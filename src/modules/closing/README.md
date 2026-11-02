@@ -10,15 +10,19 @@ the export contains and calls its files
 Maintenance triggers:
 - The effective-date expression changes (it is shared with the inbox on purpose)
 - A new kind of gap belongs in the check, or an item's link target moves
-- The export's sheets, columns, cross-reference wording, or file-naming rule change
+- The export's sheets, columns, cross-reference wording, "Erledigung" values, open-item rule,
+  or file-naming rule change
 - A real DATEV Buchungsstapel lands and this module stops being the only handover format
-Last verified: 2026-10-03, every check item's link now carries the period as a `?from=`/`?to=`
-date range, so a period-scoped count opens a period-scoped list (measured against the owner's
-real 2025 and 2026-01). Previously, 2026-10-02,
+Last verified: 2026-11-02, the workbook is now "Belege" (with "Erledigung" and "Zahlung(en)"
+per payment), "Buchungen" and a new "Offene Posten" sheet read against the period's last day;
+the "Zuordnungen" sheet is gone (decisions/0066's "Offene Posten instead of Zuordnungen",
+checked against the owner's real August 2026). Previously, 2026-10-03, every check item's link
+now carries the period as a `?from=`/`?to=` date range, so a period-scoped count opens a
+period-scoped list (measured against the owner's real 2025 and 2026-01). Previously, 2026-10-02,
 decisions/0066-abschluss-check-and-export.md: this module landed.
 Since then, two findings from real-world data: outgoing invoices got their own
 `ausgangsrechnungen/` folder, and the two bare match COUNTS became real cross references
-(`Nr.` on both sheets, plus a third "Zuordnungen" sheet).
+(`Nr.` on both sheets, plus a third "Zuordnungen" sheet, since replaced by "Offene Posten").
 
 ## Purpose
 
@@ -28,8 +32,9 @@ it over?** Two halves, both admin-only:
 1. **The check.** Five gaps, each a real SQL `count(*)` scoped to the period, each a link into
    the existing list that closes it, plus the period's own totals so "keine Lücken" can never
    be read as "nichts da".
-2. **The export.** One streamed ZIP: `uebersicht.xlsx` (three sheets, German headers, real
-   dates and real numbers) plus every document's own file, under `ausgangsrechnungen/` when
+2. **The export.** One streamed ZIP: `uebersicht.xlsx` (three sheets: the period's documents
+   with their payments, its bank transactions, and what was still owed either way on the
+   period's last day; German headers, real dates and real numbers) plus every document's own file, under `ausgangsrechnungen/` when
    the workspace issued it and `belege/` otherwise.
 
 This module deliberately does **not** become an accounting system: no chart of accounts, no
@@ -44,6 +49,7 @@ for what would have to be true before a DATEV Buchungsstapel is worth building.
   `belegFileName`/`assignBelegFileNames`/`slugifyFileNamePart`/`fileExtensionFor`/
   `closingDirectoryFor` (`core/file-names.ts`),
   `buildClosingCrossReferences`/`closingReference` (`core/cross-references.ts`),
+  `settlementTiming`/`paymentsCell`/`buildClosingOpenItems` (`core/open-items.ts`),
   `closingDocumentName`/`closingDocumentNameSource` (`core/document-name.ts`). Every one of
   them is pure.
 - `server.ts` (`server-only`): `getClosingReportProjection` for `/dashboard/abschluss`, and
@@ -63,13 +69,16 @@ for what would have to be true before a DATEV Buchungsstapel is worth building.
 - `core/file-names.ts` - `<folder>/<date>_<Name>_<id8>.<ext>`: the two folders, the slug
   rules, the media-type to extension table, and `assignBelegFileNames`, the single source both
   the workbook's "Datei" column and the archive entry read from.
-- `core/cross-references.ts` - the numbering (`D-001` / `B-001`), which rows belong together,
-  and how a confirmed counterpart that has no row in this workbook is named instead of
-  dropped. Pure: every German word arrives as a label.
+- `core/cross-references.ts` - the numbering (`D-001` / `B-001`) and the "Buchungen" sheet's
+  "Zugeordnete Belege", including how a confirmed document that has no row in this workbook is
+  named instead of dropped. Pure: every German word arrives as a label.
+- `core/open-items.ts` - everything read against the period's last day (the Stichtag): a
+  document's "Erledigung" when its payment came after it, the "Zahlung(en)" cell, and the
+  "Offene Posten" sheet's rows. Pure, labels from the caller.
 - `core/document-name.ts` - the generated name (decisions/0059), composed the same way the
   inbox composes it: a report's platform and month, a statement's kind and last booking, else
   the counterparty and the document's own date.
-- `core/types.ts` - the two already-localized sheet-row shapes.
+- `core/types.ts` - the three already-localized sheet-row shapes.
 - `server/read-models.ts` - `getClosingReportProjection`, `getClosingExportData`, and
   `createClosingDocumentFileReader`.
 - `server/export-workbook.ts` - the only `exceljs` user: three sheets, frozen header,
@@ -155,12 +164,12 @@ not listed. Both are zero in the owner's data today. Deciding it means deciding 
 ```
 abschluss-2026-01.zip
 ├── uebersicht.xlsx
-│   ├── "Dokumente"     Nr., Datum, Name, Gegenpartei, Art, Richtung, Betrag, Währung,
-│   │                   Rechnungsnummer, Zahlungsstatus, Zugeordnete Buchungen, Datei
-│   ├── "Buchungen"     Nr., Datum, Konto, Betrag, Währung, Gegenpartei, Verwendungszweck,
-│   │                   Zugeordnete Belege, Status
-│   └── "Zuordnungen"   Beleg-Nr., Belegdatum, Beleg, Belegbetrag, Währung, Buchungs-Nr.,
-│                       Buchungsdatum, Buchungsbetrag, Zugeordneter Betrag
+│   ├── "Belege"          Nr., Datum, Name, Gegenpartei, Art, Richtung, Betrag, Währung,
+│   │                     Rechnungsnummer, Erledigung, Zahlung(en), Datei
+│   ├── "Buchungen"       Nr., Datum, Konto, Betrag, Währung, Gegenpartei, Verwendungszweck,
+│   │                     Zugeordnete Belege, Status
+│   └── "Offene Posten"   Art, Beleg-Nr., Belegdatum, Beleg, Gegenpartei, Belegbetrag,
+│                         Offen zum Stichtag, Währung, Ausgeglichen
 ├── belege/
 │   ├── 2026-01-15_Bauwerk-Generalbau_a1b2c3d4.pdf
 │   ├── 2026-01-20_Kontoauszug_bb77ee10.xml
@@ -190,12 +199,19 @@ The workbook's "Datei" column and the archive entry are the same string by const
 are read out of one `assignBelegFileNames` result.
 
 **The cross references.** Each sheet's first column is its own "Nr.": `D-001`, `D-002`, ... on
-Dokumente and `B-001`, `B-002`, ... on Buchungen, numbered in that sheet's own row order.
-"Zugeordnete Buchungen" and "Zugeordnete Belege" then hold the counterparts' numbers, comma
-separated (`B-012, B-031`), and stay empty when there is none. They used to be bare counts,
-which showed both sides of a pairing but never which belonged to which.
+Belege and `B-001`, `B-002`, ... on Buchungen, numbered in that sheet's own row order.
+"Zugeordnete Belege" on Buchungen holds the documents' numbers, comma separated
+(`D-012, D-031`), and stays empty when there is none.
 
-A confirmed counterpart can have no number here, and is then NAMED rather than dropped:
+"Zahlung(en)" on Belege names every confirmed payment WITH the amount this document claims of
+it, because one booking can settle several documents (a Google Play payout covering three
+monthly reports) and one document can be settled by several bookings: `B-003: 10,00 EUR`. A
+payment with no "Nr." here is named by its date and timing instead: `02.09.2026 (nach
+Stichtag): 36,57 EUR`, `(vor dem Zeitraum)` for one paid in advance, `(nicht in dieser
+Übersicht)` for a clearing account's own row inside the period. The amount is the stored
+allocation, which is in the document's currency (the USD note below).
+
+On the Buchungen sheet, a confirmed document with no number here is NAMED rather than dropped:
 
 | Case | Cell |
 | --- | --- |
@@ -208,14 +224,27 @@ different sentences: "außerhalb des Zeitraums" would be a false statement about
 row. A marker contains commas of its own (a German amount does), so a cell holding one is
 meant to be read by a human, not split by a machine.
 
-The third sheet, **"Zuordnungen"**, holds one row per confirmed pairing that touches the
-period, both sides named, so the pairing can be read without jumping between the other two
-sheets. A side with no row here carries its label in place of a "Nr."; its date and amount are
-real values either way, and the "Beleg" name column stays empty for a document this workbook
-does not list. "Währung" is the document's own (the column sits beside "Belegbetrag"): where a
-document and the booking that settled it are in different currencies - the owner's USD
-invoices paid from a EUR account - the Buchungsbetrag beside it is in the account's currency,
-not in that one.
+**"Erledigung"** on Belege is the document's effective payment status as the rest of the
+product shows it, with two exceptions: a payment booked after the period's last day (the
+Stichtag) says `Zahlung nach Stichtag` / `Teils nach Stichtag bezahlt`, because "Bezahlt"
+alone would hide exactly the fact the tax advisor needs; and `settled` reads
+`Über Verrechnungskonto erledigt` (a platform's small ad invoices settled through its clearing
+account, never through a bank booking of their own).
+
+**"Offene Posten"** lists every document of the period that was still unpaid on the Stichtag,
+payables (`Verbindlichkeit`) first, then receivables (`Forderung`): the part paid after the
+Stichtag plus the part still open today. "Ausgeglichen" says how it was settled since
+(`19.09.2026: 50,00 EUR`, `noch offen: 12,00 EUR`). Which side is decided by an actual payment's
+sign when there is one (an app-store payout report has no direction of its own, its payout is
+money in), else by the direction and the sign of the total (a credit note on an incoming
+invoice brings money back). Documents finished without any payment (`settled`,
+`no_document_needed`) are never open items. Only the period's own documents are read: an
+older invoice still unpaid belongs to the period of its own date. It replaced the
+"Zuordnungen" sheet (one row per pairing), whose amounts now sit in "Zahlung(en)".
+
+Where a document and the booking that settled it are in different currencies - the owner's USD
+invoices paid from a EUR account - the allocation shown is in the document's currency
+(decisions/0066's note on `allocated_amount_cents`).
 
 The "Status" column on the Buchungen sheet still answers "fehlt hier etwas" on its own:
 `zugeordnet` / `kein Beleg nötig` / `offen`.
@@ -271,9 +300,11 @@ any query.
   another), `tests/file-names.test.ts` (transliteration, path-traversal and control characters,
   truncation, the media-type table, collisions), `tests/document-name.test.ts` (report,
   statement, counterparty, sender, and the never-for-outgoing rule),
-  `tests/cross-references.test.ts` (the numbering, both directions of a reference, a pairing
-  counted once although both sides know it, the out-of-period and the not-listed label, a
-  document with no amount of its own), `tests/export-workbook.test.ts` (real `Date` and
+  `tests/cross-references.test.ts` (the numbering, a booking pointing at its documents, the
+  out-of-period and the not-listed label, a document with no amount of its own),
+  `tests/open-items.test.ts` (the Stichtag reading on the owner's real August cases: paid
+  after, partly after, a collective payout's share, a payout report as a receivable, unpaid
+  invoices by direction and sign, clearing-account settlements left out), `tests/export-workbook.test.ts` (real `Date` and
   `number` cells, read back through exceljs),
   `tests/export-archive.test.ts` (a valid ZIP, one entry in flight at a time, failure destroys
   the stream), and `tests/export.test.ts` (the whole assembly against stubbed read models: the
@@ -281,7 +312,8 @@ any query.
   an outgoing invoice under `ausgangsrechnungen/` while everything else stays under `belege/`,
   and - by unzipping `uebersicht.xlsx` back out of the archive - that the "Datei" column holds
   exactly the paths the archive actually contains, that every "Nr." a cell points at resolves,
-  and that the "Zuordnungen" sheet pairs an in-period and an out-of-period side correctly).
+  that a payment after the Stichtag shows in "Erledigung" and "Zahlung(en)", and that "Offene
+  Posten" lists a payable and a receivable in that order).
 - DB (`src/persistence/tests/closing-repository.db.test.ts`, real Postgres): which date puts a
   document in a period for all four `coalesce` arms, that the period scoping and the inbox's
   ordering agree, the four document counts, the transaction counts against exactly

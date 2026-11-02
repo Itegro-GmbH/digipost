@@ -1380,7 +1380,7 @@
     "periodYears": "Jahre",
     "periodSubmit": "Anzeigen",
     "download": "Export herunterladen",
-    "downloadHint": "Eine ZIP-Datei mit uebersicht.xlsx (Dokumente, Buchungen und Zuordnungen des Zeitraums), allen Belegen und den eigenen Ausgangsrechnungen.",
+    "downloadHint": "Eine ZIP-Datei mit uebersicht.xlsx (Belege mit ihren Zahlungen, Buchungen und offene Posten zum Stichtag), allen Belegen und den eigenen Ausgangsrechnungen.",
     "completeHeading": "Dieser Zeitraum ist vollständig.",
     "completeHint": "Es fehlt nichts, was Digipost kennt. Belege, die nie hochgeladen wurden, kann auch dieser Abschluss nicht sehen.",
     "emptyPeriod": "In diesem Zeitraum liegen weder Dokumente noch Buchungen. Ein leerer Zeitraum ist kein abgeschlossener Zeitraum.",
@@ -1411,9 +1411,9 @@
       }
     },
     "export": {
-      "documentsSheet": "Dokumente",
+      "documentsSheet": "Belege",
       "transactionsSheet": "Buchungen",
-      "assignmentsSheet": "Zuordnungen",
+      "openItemsSheet": "Offene Posten",
       "documentColumns": {
         "reference": "Nr.",
         "date": "Datum",
@@ -1424,8 +1424,8 @@
         "amount": "Betrag",
         "currency": "Währung",
         "invoiceNumber": "Rechnungsnummer",
-        "paymentStatus": "Zahlungsstatus",
-        "matchedTransactions": "Zugeordnete Buchungen",
+        "settlement": "Erledigung",
+        "payments": "Zahlung(en)",
         "file": "Datei"
       },
       "transactionColumns": {
@@ -1439,17 +1439,32 @@
         "matchedDocuments": "Zugeordnete Belege",
         "status": "Status"
       },
-      "assignmentColumns": {
+      "openItemColumns": {
+        "type": "Art",
         "documentReference": "Beleg-Nr.",
         "documentDate": "Belegdatum",
         "document": "Beleg",
+        "counterparty": "Gegenpartei",
         "documentAmount": "Belegbetrag",
+        "openAmount": "Offen zum Stichtag",
         "currency": "Währung",
-        "transactionReference": "Buchungs-Nr.",
-        "transactionDate": "Buchungsdatum",
-        "transactionAmount": "Buchungsbetrag",
-        "allocatedAmount": "Zugeordneter Betrag"
+        "settledBy": "Ausgeglichen"
       },
+      "openItemType": {
+        "payable": "Verbindlichkeit",
+        "receivable": "Forderung"
+      },
+      "openItemPaidOn": "{date}: {amount}",
+      "openItemStillOpen": "noch offen: {amount}",
+      "settlement": {
+        "afterPeriod": "Zahlung nach Stichtag",
+        "partlyAfterPeriod": "Teils nach Stichtag bezahlt",
+        "settledViaClearing": "Über Verrechnungskonto erledigt"
+      },
+      "paymentListed": "{reference}: {amount}",
+      "paymentBeforePeriod": "{date} (vor dem Zeitraum): {amount}",
+      "paymentAfterPeriod": "{date} (nach Stichtag): {amount}",
+      "paymentNotListed": "{date} (nicht in dieser Übersicht): {amount}",
       "transactionStatus": {
         "matched": "zugeordnet",
         "noDocumentNeeded": "kein Beleg nötig",

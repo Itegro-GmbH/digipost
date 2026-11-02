@@ -39,7 +39,6 @@ export {
   closingReference,
   DOCUMENT_REFERENCE_PREFIX,
   TRANSACTION_REFERENCE_PREFIX,
-  type ClosingAssignment,
   type ClosingCrossReferences,
   type ClosingReferenceLabels,
   type CrossReferenceCounterpart,
@@ -50,4 +49,17 @@ export {
   type ClosingNameableDocument,
   type ClosingNameLabels,
 } from "./core/document-name";
-export type { ClosingAssignmentSheetRow, ClosingDocumentSheetRow, ClosingTransactionSheetRow } from "./core/types";
+export {
+  buildClosingOpenItems,
+  CLOSING_SETTLEMENT_TIMINGS,
+  OPEN_ITEM_TYPES,
+  paymentsCell,
+  settlementTiming,
+  type ClosingDatedPayment,
+  type ClosingOpenItem,
+  type ClosingPaymentAmount,
+  type ClosingPaymentLabels,
+  type ClosingSettlementTiming,
+  type OpenItemType,
+} from "./core/open-items";
+export type { ClosingDocumentSheetRow, ClosingOpenItemSheetRow, ClosingTransactionSheetRow } from "./core/types";
