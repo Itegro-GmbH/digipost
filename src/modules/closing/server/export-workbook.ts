@@ -6,7 +6,7 @@ import "server-only";
  *
  * It knows no German, no business rule and no permission - every header is passed in
  * already translated and every cell value is already resolved
- * (`core/types.ts`'s `ClosingDocumentSheetRow`/`ClosingTransactionSheetRow`). Dates are
+ * (`core/types.ts`'s three row shapes). Dates are
  * written as real dates and amounts as real numbers, with a display format, so the advisor's
  * Excel can sort, filter and sum them (decisions/0066: that is the whole reason this is a
  * workbook and not a CSV).
@@ -55,16 +55,16 @@ function addSheet<TRow>(workbook: ExcelJS.Workbook, spec: ClosingSheetSpec<TRow>
   }
 }
 
-export async function buildClosingOverviewWorkbook<TDocument, TTransaction, TAssignment>(
+export async function buildClosingOverviewWorkbook<TDocument, TTransaction, TOpenItem>(
   documents: ClosingSheetSpec<TDocument>,
   transactions: ClosingSheetSpec<TTransaction>,
-  assignments: ClosingSheetSpec<TAssignment>,
+  openItems: ClosingSheetSpec<TOpenItem>,
 ): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
   workbook.created = new Date();
   addSheet(workbook, documents);
   addSheet(workbook, transactions);
-  addSheet(workbook, assignments);
+  addSheet(workbook, openItems);
   // `writeBuffer` returns an `ArrayBuffer`-like value typed loosely by exceljs; the archive
   // only ever needs a Node `Buffer`.
   const written = await workbook.xlsx.writeBuffer();

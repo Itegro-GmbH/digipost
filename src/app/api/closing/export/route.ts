@@ -1,8 +1,9 @@
 /**
  * `GET /api/closing/export?period=2026-01` (decisions/0066-abschluss-check-and-export.md):
  * streams the Abschluss export - one ZIP holding `uebersicht.xlsx` (three sheets: the
- * period's documents, its transactions, and the confirmed pairings between them, German
- * headers, real dates and real numbers) plus every document's own file, the searchable PDF
+ * period's documents with their payments, its transactions, and the open items on the
+ * period's last day, German headers, real dates and real numbers) plus every document's own
+ * file, the searchable PDF
  * where processing produced one and the original upload otherwise:
  * `ausgangsrechnungen/<file>` for a document the workspace issued itself, `belege/<file>`
  * for everything else.
@@ -71,6 +72,15 @@ export async function GET(request: Request): Promise<Response> {
   /** A confirmed counterpart with no "Nr." in this workbook, named by its own date and
    * amount: "außerhalb des Zeitraums (14.12.2025, 23,00 EUR)". An amount can genuinely be
    * missing (a document that carries none at all), and then the date alone has to do. */
+  const formatIsoDate = (isoDate: string): string => dateFormatter.format(new Date(`${isoDate}T00:00:00`));
+  const formatAmount = ({ amountCents, currency }: { amountCents: number; currency: string }): string =>
+    amountFormatter(currency).format(amountCents / 100);
+  /** One payment in the "Zahlung(en)" cell, named by its date when it has no "Nr." here. */
+  const describePayment =
+    (key: "paymentBeforePeriod" | "paymentAfterPeriod" | "paymentNotListed") =>
+    (payment: { isoDate: string; amountCents: number; currency: string }): string =>
+      tExport(key, { date: formatIsoDate(payment.isoDate), amount: formatAmount(payment) });
+
   const describeCounterpart =
     (withAmount: "outsidePeriod" | "notListed", withoutAmount: "outsidePeriodWithoutAmount" | "notListedWithoutAmount") =>
     ({ isoDate, amountCents, currency }: { isoDate: string; amountCents: number | null; currency: string | null }): string => {
@@ -82,7 +92,7 @@ export async function GET(request: Request): Promise<Response> {
   const labels: ClosingExportLabels = {
     documentsSheetName: tExport("documentsSheet"),
     transactionsSheetName: tExport("transactionsSheet"),
-    assignmentsSheetName: tExport("assignmentsSheet"),
+    openItemsSheetName: tExport("openItemsSheet"),
     documentColumns: {
       reference: tExport("documentColumns.reference"),
       date: tExport("documentColumns.date"),
@@ -93,8 +103,8 @@ export async function GET(request: Request): Promise<Response> {
       amount: tExport("documentColumns.amount"),
       currency: tExport("documentColumns.currency"),
       invoiceNumber: tExport("documentColumns.invoiceNumber"),
-      paymentStatus: tExport("documentColumns.paymentStatus"),
-      matchedTransactions: tExport("documentColumns.matchedTransactions"),
+      settlement: tExport("documentColumns.settlement"),
+      payments: tExport("documentColumns.payments"),
       file: tExport("documentColumns.file"),
     },
     transactionColumns: {
@@ -108,20 +118,39 @@ export async function GET(request: Request): Promise<Response> {
       matchedDocuments: tExport("transactionColumns.matchedDocuments"),
       status: tExport("transactionColumns.status"),
     },
-    assignmentColumns: {
-      documentReference: tExport("assignmentColumns.documentReference"),
-      documentDate: tExport("assignmentColumns.documentDate"),
-      document: tExport("assignmentColumns.document"),
-      documentAmount: tExport("assignmentColumns.documentAmount"),
-      currency: tExport("assignmentColumns.currency"),
-      transactionReference: tExport("assignmentColumns.transactionReference"),
-      transactionDate: tExport("assignmentColumns.transactionDate"),
-      transactionAmount: tExport("assignmentColumns.transactionAmount"),
-      allocatedAmount: tExport("assignmentColumns.allocatedAmount"),
+    openItemColumns: {
+      type: tExport("openItemColumns.type"),
+      documentReference: tExport("openItemColumns.documentReference"),
+      documentDate: tExport("openItemColumns.documentDate"),
+      document: tExport("openItemColumns.document"),
+      counterparty: tExport("openItemColumns.counterparty"),
+      documentAmount: tExport("openItemColumns.documentAmount"),
+      openAmount: tExport("openItemColumns.openAmount"),
+      currency: tExport("openItemColumns.currency"),
+      settledBy: tExport("openItemColumns.settledBy"),
     },
     reference: {
       outsidePeriod: describeCounterpart("outsidePeriod", "outsidePeriodWithoutAmount"),
       notListed: describeCounterpart("notListed", "notListedWithoutAmount"),
+    },
+    payment: {
+      listed: (reference, amount) => tExport("paymentListed", { reference, amount: formatAmount(amount) }),
+      beforePeriod: describePayment("paymentBeforePeriod"),
+      afterPeriod: describePayment("paymentAfterPeriod"),
+      notListed: describePayment("paymentNotListed"),
+    },
+    settlement: {
+      afterPeriod: tExport("settlement.afterPeriod"),
+      partlyAfterPeriod: tExport("settlement.partlyAfterPeriod"),
+      settledViaClearing: tExport("settlement.settledViaClearing"),
+    },
+    openItemType: {
+      payable: tExport("openItemType.payable"),
+      receivable: tExport("openItemType.receivable"),
+    },
+    openItem: {
+      paidOn: (payment) => tExport("openItemPaidOn", { date: formatIsoDate(payment.isoDate), amount: formatAmount(payment) }),
+      stillOpen: (amount) => tExport("openItemStillOpen", { amount: formatAmount(amount) }),
     },
     transactionStatus: {
       matched: tExport("transactionStatus.matched"),

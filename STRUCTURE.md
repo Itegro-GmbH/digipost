@@ -15,7 +15,9 @@ Maintenance triggers:
 - A new vendor SDK or a new sensitive env var is introduced
 - `scripts/structure/**` gains or loses a rule (keep the rule table and the
   ```structure block names in 1:1 correspondence, enforced by the checker itself)
-Last verified: 2026-10-22, decisions/0075-email-intake.md added two owners under the
+Last verified: 2026-11-03, `project.yaml` (the Itegro project index manifest, added on `main`
+on 2026-10-25) declared as a root entry; it failed this check once `main` was tested together
+with `development`. Previously, 2026-10-22, decisions/0075-email-intake.md added two owners under the
 existing container rules, `src/modules/mail-intake` (the E-Mail-Eingang's domain, UI and
 admin notification e-mail) and `src/platform/inbound-mail` (the Resend port and webhook
 verification), plus the `env-access` rows for `RESEND_API_KEY`/`RESEND_WEBHOOK_SECRET`, the
@@ -110,6 +112,7 @@ drizzle.config.ts
 vitest.config.ts
 playwright.config.ts
 vercel.json
+project.yaml
 .env.example
 .gitignore
 .dockerignore
