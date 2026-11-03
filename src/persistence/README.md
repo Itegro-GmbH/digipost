@@ -12,7 +12,9 @@ Maintenance triggers:
   ownership table below, its slot to `Repositories`)
 - `src/persistence/schema/**` changes (the migration baseline note may need updating)
 - The role/grant model changes (`src/persistence/sql/grants/grants.sql`)
-Last verified: 2026-10-22, decisions/0075-email-intake.md: new owner area `mail-intake`
+Last verified: 2026-11-03, decisions/0078-mcp-server.md: the OAuth tables in `auth.ts` (migration
+0025) and `src/platform/auth/server/oauth-grants.ts` as a second auth-database importer.
+Previously 2026-10-22, decisions/0075-email-intake.md: new owner area `mail-intake`
 (`schema/mail-intake.ts`, `repositories/{contracts,drizzle}/mail-intake-repository.ts` as
 `Repositories.mailIntake`, `use-cases/mail-intake-use-cases.ts`, wired in
 `composition/create-request-services.ts` with `getInboundMailProvider()`/`getInboundEmailDomain()`
@@ -178,10 +180,12 @@ not a use case or repository.
 ```structure narrow-entry
 target   src/persistence/composition/auth-database.ts
 owner    persistence
-importer src/platform/auth/server/auth.ts
+importer src/platform/auth/server/auth.ts, src/platform/auth/server/oauth-grants.ts
 reason   Better Auth's Drizzle adapter needs the Drizzle instance and the auth
          schema directly for its own adapter; the rest of the persistence graph
          (use cases, the Unit of Work) does not belong in auth initialization.
+         The MCP server's OAuth grant checks (decisions/0078-mcp-server.md) read
+         and write the same `auth` tables.
 ```
 
 ## 3. Roles and grants (decisions/0004-three-database-roles.md, the target model)
@@ -220,7 +224,7 @@ enforces.
 
 | Schema file | Postgres schema | Tables | Owner |
 |---|---|---|---|
-| `auth.ts` | `auth` | `user`, `session`, `account`, `verification`, `rateLimit` | `src/platform/auth` (Better Auth's Drizzle adapter, decisions/0005, is the only writer, via `composition/auth-database.ts`, T3) |
+| `auth.ts` | `auth` | `user`, `session`, `account`, `verification`, `rateLimit`; the OAuth tables of decisions/0078-mcp-server.md (`jwks`, `oauthClient`, `oauthResource`, `oauthClientResource`, `oauthRefreshToken`, `oauthAccessToken`, `oauthConsent`, `oauthClientAssertion`, `mcpClientUsage`) | `src/platform/auth` (Better Auth's Drizzle adapter, decisions/0005, via `composition/auth-database.ts`, T3; plus `server/oauth-grants.ts` for grant checks, usage counting and revocation) |
 | `workspaces.ts` | `public` | `workspaces`, `workspace_members`, `workspace_invitations` | `src/modules/workspaces` (decisions/0014-workspaces-and-access.md) - the tenancy vertical slice: workspace creation, membership, and invitations. `workspaces` also carries the `company_*` columns (decisions/0019-contacts.md's own-company exclusion), added by `src/modules/contacts`'s phase but still owned/written by `src/modules/workspaces` |
 | `documents.ts` | `public` | `documents` | `src/modules/documents` (decisions/0015-documents-and-quotas.md) - upload, storage, search. No category or assignee columns (decisions/0063-no-category-no-assignment-no-routing.md removed both). `documents` also carries `file_hash`/`kind`/`intake_status`/`intake_result` (decisions/0022-intake-wiring.md, F1b: the universal intake recognizer's own taxonomy and confirmation state) |
 | `intake-fingerprints.ts` | `public` | `intake_source_fingerprints` | `src/modules/documents` (decisions/0022-intake-wiring.md, F1b) - a workspace's confirmed tabular source layouts (column mapping, amount-sign decision), keyed by `TabularSample.fingerprint` (`@/modules/intake`); kept in its own schema file to avoid a schema-file import cycle |

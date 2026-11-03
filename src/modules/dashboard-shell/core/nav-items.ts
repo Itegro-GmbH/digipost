@@ -72,6 +72,9 @@ export const NAV_SECTIONS: readonly NavSection[] = [
       { href: "/dashboard/team", labelKey: "team" },
       { href: "/dashboard/settings/company", labelKey: "companySettings", permission: "company_profile.manage" },
       { href: "/dashboard/settings/intake", labelKey: "intakeSettings", permission: "intake.manage" },
+      // decisions/0078-mcp-server.md: no `permission` - every user connects their own AI clients,
+      // which act with that user's own permissions.
+      { href: "/dashboard/settings/ai-clients", labelKey: "aiClients" },
       // "Tarif & Nutzung" (`src/modules/billing`, decisions/0017-billing-tiers-and-packages.md):
       // no `permission` - every workspace member may SEE this page, only `billing.manage`
       // (admin-only) may change anything on it (enforced by the page/actions themselves).

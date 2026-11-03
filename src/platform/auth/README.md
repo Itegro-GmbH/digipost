@@ -13,7 +13,10 @@ Maintenance triggers:
 - A new rate-limited Better Auth endpoint needs a Server Action caller
   (decisions/0005: it MUST go through `getAuth().handler(request)`, never `auth.api.*`)
 - The IP header trust order (`ipAddressHeaders`) or the hosting/proxy setup changes
-Last verified: 2026-10-21, decisions/0074-sign-up-by-invitation-only.md: new accounts only for
+Last verified: 2026-11-03, decisions/0078-mcp-server.md: the OAuth 2.1 authorization server of
+the MCP server (`jwt()`, `mcp()`, `cimd()`, see "OAuth authorization server for the MCP server"
+below) and the files `server/oauth-config.ts`, `server/mcp-bearer.ts`, `server/oauth-flow.ts`,
+`server/oauth-grants.ts`. Previously 2026-10-21, decisions/0074-sign-up-by-invitation-only.md: new accounts only for
 an invited address or one of `AUTH_BOOTSTRAP_EMAILS` (`server/sign-up-gate.ts`, checked in
 `sendMagicLink` and in the user-create database hook). Previously 2026-09-20, P6 review: hardened the IP header trust order (see "IP address
 trust" below); decisions/0005-better-auth-magic-link-drizzle-adapter.md is Accepted and
@@ -42,7 +45,11 @@ in `src/platform/auth` + `src/persistence/schema/auth.ts`, not the whole product
 
 `server.ts` (`import "server-only"`, never imported from client-reachable code):
 `getAuth`, `MAGIC_LINK_EXPIRES_IN_SECONDS`, `getCurrentUser`, `requireUser`,
-`CurrentUser`, `authRouteHandlers`.
+`CurrentUser`, `authRouteHandlers`; for the MCP server (decisions/0078-mcp-server.md):
+`MCP_RESOURCE_PATH`, `MCP_SCOPE`, `MCP_OAUTH_SCOPES`, `mcpResourceUrl`, `withMcpBearerAuth`,
+`McpCaller`, `verifyOAuthQuery`, `oauthAuthorizeResumePath`, `getOAuthClientDisplay`,
+`openIdConfigurationResponse`, `listConnectedAiClients`, `revokeConnectedAiClient`,
+`ConnectedAiClient`, and the `MCP_RATE_LIMIT_*` constants.
 
 `proxy-gate.ts` (no `server-only`, no DB/network) - the one further subpath besides
 `server.ts` (WEBAPP_TEMPLATE_SPEC.md §4.2), imported only by the root `src/proxy.ts`:
@@ -64,6 +71,13 @@ in `src/platform/auth` + `src/persistence/schema/auth.ts`, not the whole product
   wrapper `src/app/api/auth/[...all]/route.ts` delegates to.
 - `server/emails/magic-link-email.tsx` - the magic-link e-mail (React Email
   component + `renderMagicLinkEmail`, via `src/platform/mailer/server`'s `renderEmail`).
+- `server/oauth-config.ts` - the MCP resource path, scopes, token lifetime, login/consent pages.
+- `server/mcp-bearer.ts` - `withMcpBearerAuth`: token verification, live grant, rate limit.
+- `server/oauth-flow.ts` - the signed authorize query (`/oauth/login`, `/oauth/consent`), the
+  consent page's client display, OIDC discovery at the path-insertion URL.
+- `server/oauth-grants.ts` - grant lookup, usage/rate-limit counting, listing and revoking
+  connected clients; the only file besides `server/auth.ts` that imports the auth-database
+  narrow entry (STRUCTURE.md §4).
 - `proxy-gate.ts` - the DB-free subpath for `src/proxy.ts`.
 - `server.ts` - the public, privileged entrypoint.
 - `tests/` - unit tests (env-boundary and session-lookup only; see below).
@@ -120,6 +134,37 @@ call `getAuth().handler(request)` with (see "Why rate-limited calls go through
 `getAuth().handler(request)`" above) - it forwards all three headers, in this same order,
 from the incoming Server Action request; a header configured here but not forwarded there
 would be invisible to the rate limiter no matter how trustworthy it is.
+
+## OAuth authorization server for the MCP server
+
+decisions/0078-mcp-server.md. The same Better Auth instance is the OAuth 2.1 authorization
+server for `/api/mcp`:
+
+- `jwt()` signs access tokens (keys in `auth.jwks`, public half at `/api/auth/jwks`); its own
+  session-JWT endpoint `/token` is disabled (`disabledPaths`).
+- `mcp()` (= `@better-auth/oauth-provider`): authorize, consent, token, register (RFC 7591,
+  unauthenticated, rate limited to 20 per hour per IP), revoke, userinfo; the protected resource
+  metadata (RFC 9728) and authorization server metadata (RFC 8414). Access tokens are 15-minute
+  JWTs with `aud` = `<APP_URL>/api/mcp`; refresh tokens rotate (30-second replay window).
+- `cimd()`: Client ID Metadata Documents (a URL as `client_id`), fetched through
+  `@better-auth/cimd/node`'s transport, which pins public DNS answers and never follows redirects
+  (no SSRF into the internal network).
+- `loginPage` is `/oauth/login` (`src/app/(auth)/oauth/login/route.ts`), which verifies the signed
+  query and hands off to the ordinary `/login` with `next=` set to the authorize URL. No new
+  sign-up path: decisions/0074's gate applies unchanged.
+- `consentPage` is `/oauth/consent`; the decision is posted with `fetch` (CSP `form-action 'self'`).
+- `withMcpBearerAuth` checks, per MCP request, the JWT (`requireMcpAuth`, JWKS fetched over HTTP
+  from `APP_URL` and cached five minutes), that a consent row still exists for (user, client),
+  and the rate limit (120 requests per minute per user and client, 300 per user), counted with
+  the last use in `auth."mcpClientUsage"`.
+- `revokeConnectedAiClient` deletes consent, refresh tokens, stored access tokens and the usage
+  row in one transaction. Better Auth's own `/oauth2/delete-consent` is not used: it leaves the
+  refresh token working.
+
+All of these tables live in the `auth` schema (`src/persistence/schema/auth.ts`), are written only
+by Better Auth's adapter or by `server/oauth-grants.ts`, and cascade from `auth.user`/
+`auth."oauthClient"`. Tests: `tests/integration/http/mcp-oauth.integration.test.ts` runs the whole
+flow in process against the test database.
 
 ## Consumers
 

@@ -14,7 +14,13 @@ Maintenance triggers:
   decisions/0070-several-workspaces-per-user.md)
 - `src/modules/workspaces`'s `getMembershipForUser` use case's return shape changes
 - A new route or Server Action needs workspace-scoped access
-Last verified: 2026-10-22, decisions/0075-email-intake.md: added `PERMISSIONS.mailIntakeManage`
+Last verified: 2026-11-03, decisions/0078-mcp-server.md: `server/delegated-principal.ts`
+(`runAsDelegatedPrincipal`/`currentDelegatedPrincipal`): inside an MCP tool call,
+`getWorkspaceAccess` resolves the verified OAuth token's user instead of the session, and
+`resolveAccess` gained an explicit selection mode (`{ source: "explicit", workspaceId }`): the
+named workspace must be one of the user's memberships or nothing resolves (no fallback), no id
+means the oldest membership, no cookie is read. Still the one place the workspace is decided.
+Previously 2026-10-22, decisions/0075-email-intake.md: added `PERMISSIONS.mailIntakeManage`
 (`"mail_intake.manage"`, admin-only) - gates every E-Mail-Eingang action and the received-mail
 log; every member still sees the address. Previously 2026-10-03, decisions/0070-several-workspaces-per-user.md: a user may belong
 to several workspaces, so `resolveAccess` now also decides WHICH one a request acts in. It
@@ -77,7 +83,8 @@ yours" from "does not exist".
   A client component may use these to hide a control the server would reject anyway -
   display only, never the real authorization check.
 - `server.ts` (privileged, `import "server-only"`): `getWorkspaceAccess`,
-  `resolveAccess`, `requirePermission`, `requireWorkspaceMember`, `workspaceAccess`,
+  `resolveAccess` (+ `ResolveAccessOptions`), `runAsDelegatedPrincipal`,
+  `currentDelegatedPrincipal`, `requirePermission`, `requireWorkspaceMember`, `workspaceAccess`,
   `WorkspaceAccessError`, and the `WorkspaceAccess`/`WorkspaceAccessErrorCode`/
   `WorkspaceAccessResult` types.
 
@@ -97,6 +104,12 @@ yours" from "does not exist".
   workspace is decided, `null` if the user has no membership yet) and `getWorkspaceAccess()` (the non-redirecting entry point: resolves
   the signed-in user via `getCurrentUser()`, then `resolveAccess`, returning a discriminated
   `{ status: "ok" | "error" }` result).
+- `server/delegated-principal.ts` - decisions/0078-mcp-server.md: `runAsDelegatedPrincipal(
+  { user, workspaceId?, clientId }, fn)` (an `AsyncLocalStorage` scoped to one MCP tool call) and
+  `currentDelegatedPrincipal()`. `getWorkspaceAccess` uses the principal's user (never the
+  session) and passes its `workspaceId` to `resolveAccess` as an explicit selection. Only
+  `src/modules/mcp` sets one, and only after `src/platform/auth`'s `withMcpBearerAuth` verified
+  the token and the grant.
 - `server/require-permission.ts` - `requirePermission(permission)`: `getWorkspaceAccess()`
   plus a permission check, still non-redirecting - the shape a Server Action maps straight
   to its own `ActionResult` error code.

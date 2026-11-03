@@ -113,6 +113,55 @@ export async function listContactsProjection(workspaceId: string, params: ListCo
   return { items, hasMore: result.hasMore, page: params.page };
 }
 
+/** decisions/0078-mcp-server.md: one compact row of the MCP server's contact search. */
+export type ContactSummaryItem = {
+  id: string;
+  name: string;
+  relationType: ContactRelationType | null;
+  city: string | null;
+  vatId: string | null;
+  iban: string | null;
+  email: string | null;
+  customerNumber: string | null;
+  supplierNumber: string | null;
+  verified: boolean;
+};
+
+/**
+ * decisions/0078-mcp-server.md: the contacts list WITHOUT `listContactsProjection`'s per-row
+ * `getById` (its documented N+1 for the document/proposal counts) - one query, a
+ * caller-chosen page size, and the fields an AI needs to pick the right contact. Counts and
+ * linked documents are one `getContactDetailProjection` call away.
+ */
+export async function listContactSummariesProjection(
+  workspaceId: string,
+  params: ListContactsParams & { pageSize: number },
+): Promise<{ items: ContactSummaryItem[]; hasMore: boolean; page: number }> {
+  const result = await getRequestServices().contacts.listForWorkspace(workspaceId, {
+    q: params.q,
+    relationType: params.relationType,
+    verified: params.onlyUnverified ? false : undefined,
+    page: params.page,
+    pageSize: params.pageSize,
+  });
+  return {
+    items: result.items.map((contact) => ({
+      id: contact.id,
+      name: contact.name,
+      relationType: contact.relationType,
+      city: contact.city,
+      vatId: contact.vatId,
+      iban: contact.iban,
+      email: contact.email,
+      customerNumber: contact.customerNumber,
+      supplierNumber: contact.supplierNumber,
+      verified: contact.verifiedAt !== null,
+    })),
+    hasMore: result.hasMore,
+    page: params.page,
+  };
+}
+
 /** `null` when the contact does not exist in this workspace - the `[id]` page 404s. */
 export const getContactDetailProjection = cache(
   async (workspaceId: string, id: string): Promise<ContactDetailView | null> => {

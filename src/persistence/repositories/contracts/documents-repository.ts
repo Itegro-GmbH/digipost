@@ -236,6 +236,30 @@ export type ClosingDocumentRow = {
   confirmedTransactions: ClosingLinkedTransaction[];
 };
 
+/** decisions/0078-mcp-server.md: one row of `listSummaries`. `paymentStatus` is the EFFECTIVE
+ * status (an open document past its due date reads `overdue`), the same value the inbox's
+ * payment filter matches against; `effectiveDate` is the date the list is ordered by. */
+export type DocumentSummaryRow = {
+  id: string;
+  title: string | null;
+  originalFileName: string;
+  sender: string | null;
+  counterpartyName: string | null;
+  status: string;
+  kind: string;
+  direction: string | null;
+  intakeStatus: string;
+  documentDate: string | null;
+  effectiveDate: string;
+  invoiceNumber: string | null;
+  totalAmountCents: number | null;
+  currency: string | null;
+  dueDate: string | null;
+  paymentStatus: string;
+  paidAt: Date | null;
+  createdAt: Date;
+};
+
 export type ListDocumentsResult = {
   items: DocumentListRow[];
   /** Whether a page after this one has at least one more matching row - offset pagination
@@ -285,6 +309,10 @@ export interface DocumentRepository {
     excludeDocumentId: string,
   ): Promise<{ id: string; paymentStatus: PaymentStatus; paidAt: Date | null }[]>;
   list(workspaceId: string, filter: ListDocumentsFilter): Promise<ListDocumentsResult>;
+  /** decisions/0078-mcp-server.md: the same filter, order and paging as `list`, but only the
+   * columns a result list needs - no OCR text/blocks, no intake payload, no search vector, no
+   * per-page uploader lookup. One query. */
+  listSummaries(workspaceId: string, filter: ListDocumentsFilter): Promise<{ items: DocumentSummaryRow[]; hasMore: boolean }>;
   /** Deletes the row; the returned row's `storageKey`/`searchablePdfKey` let the use case
    * delete the matching objects from `src/platform/object-storage` in the same operation
    * (decisions/0012-object-storage.md: deleting a document row does not by itself delete its

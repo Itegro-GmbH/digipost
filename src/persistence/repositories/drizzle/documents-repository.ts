@@ -13,6 +13,7 @@ import type {
   ClosingLinkedTransaction,
   DocumentRepository,
   DocumentWithRelations,
+  ListDocumentsFilter,
 } from "@/persistence/repositories/contracts/documents-repository";
 
 // F3b (decisions/0025-payment-matching-wiring.md): the SQL mirror of `@/modules/payments`'s
@@ -119,6 +120,46 @@ function effectiveDateRangeConditions(range: DateRange): SQL[] {
   if (range.from !== undefined) conditions.push(sql`${documentEffectiveDate} >= ${range.from}::date`);
   if (range.to !== undefined) conditions.push(sql`${documentEffectiveDate} <= ${range.to}::date`);
   return conditions;
+}
+
+/**
+ * The shared WHERE/ORDER BY/LIMIT of the inbox list (`list`) and its lean sibling
+ * (`listSummaries`, decisions/0078-mcp-server.md), so the two can never disagree about which
+ * documents a filter matches or in which order.
+ */
+function listPlan(workspaceId: string, filter: ListDocumentsFilter): { where: SQL | undefined; orderBy: SQL[]; limit: number; offset: number } {
+  const conditions: SQL[] = [eq(documents.workspaceId, workspaceId)];
+  if (filter.status) conditions.push(eq(documents.status, filter.status));
+  if (filter.direction) conditions.push(eq(documents.direction, filter.direction));
+  if (filter.kind) conditions.push(eq(documents.kind, filter.kind));
+  if (filter.paymentStatus) conditions.push(eq(effectivePaymentStatus, filter.paymentStatus));
+  if (filter.intakeStatus) conditions.push(eq(documents.intakeStatus, filter.intakeStatus));
+  // decisions/0066-abschluss-check-and-export.md: the date-range filter runs against
+  // `documentEffectiveDate`, the very expression this list is ordered by below and the
+  // Abschluss's own counts are scoped by - so "N Belege im Zeitraum" and the list that
+  // link opens are the same set, never two notions of a document's date.
+  conditions.push(...effectiveDateRangeConditions(filter));
+
+  const q = filter.q?.trim();
+  if (q) conditions.push(sql`${documents.searchVector} @@ websearch_to_tsquery('german', ${q})`);
+  const rank = q ? sql`ts_rank(${documents.searchVector}, websearch_to_tsquery('german', ${q}))` : null;
+
+  // A `ts_rank` order alone has no deterministic tie-break: two documents with the
+  // exact same rank (a very common case - e.g. neither has a search-relevant field
+  // populated yet) had no guaranteed relative order between them, so offset pagination
+  // could skip or duplicate a row across pages depending on the plan Postgres happened
+  // to pick (P6 review finding A8). `created_at desc, id desc` behind it makes the full
+  // order deterministic (createdAt alone is still not quite enough: two documents
+  // created in the same transaction can share a timestamp, hence `id` as the final
+  // tie-break).
+  // decisions/0058-inbox-sorts-by-the-document-s-own-date.md: the inbox is ordered by the
+  // date the document itself carries - `documentEffectiveDate`, the one shared expression
+  // the Abschluss scopes its period by too (decisions/0066-abschluss-check-and-export.md),
+  // so the two can never disagree about which month a document belongs to.
+  const primaryOrder = filter.sort === "uploaded" ? [desc(documents.createdAt)] : [desc(documentEffectiveDate), desc(documents.createdAt)];
+  const orderBy = [...(rank ? [desc(rank)] : []), ...primaryOrder, desc(documents.id)];
+
+  return { where: and(...conditions), orderBy, limit: filter.pageSize + 1, offset: (filter.page - 1) * filter.pageSize };
 }
 
 export function createDrizzleDocumentRepository(db: DbExecutor): DocumentRepository {
@@ -248,28 +289,9 @@ export function createDrizzleDocumentRepository(db: DbExecutor): DocumentReposit
     },
 
     async list(workspaceId, filter) {
-      const conditions = [eq(documents.workspaceId, workspaceId)];
-      if (filter.status) conditions.push(eq(documents.status, filter.status));
-      if (filter.direction) conditions.push(eq(documents.direction, filter.direction));
-      if (filter.kind) conditions.push(eq(documents.kind, filter.kind));
-      if (filter.paymentStatus) conditions.push(eq(effectivePaymentStatus, filter.paymentStatus));
-      if (filter.intakeStatus) conditions.push(eq(documents.intakeStatus, filter.intakeStatus));
-      // decisions/0066-abschluss-check-and-export.md: the date-range filter runs against
-      // `documentEffectiveDate`, the very expression this list is ordered by below and the
-      // Abschluss's own counts are scoped by - so "N Belege im Zeitraum" and the list that
-      // link opens are the same set, never two notions of a document's date.
-      conditions.push(...effectiveDateRangeConditions(filter));
+      const { where, orderBy, limit, offset } = listPlan(workspaceId, filter);
 
-      const q = filter.q?.trim();
-      const searchCondition = q ? sql`${documents.searchVector} @@ websearch_to_tsquery('german', ${q})` : null;
-      if (searchCondition) conditions.push(searchCondition);
-
-      const rank = q ? sql`ts_rank(${documents.searchVector}, websearch_to_tsquery('german', ${q}))` : null;
-
-      const offset = (filter.page - 1) * filter.pageSize;
-      const limit = filter.pageSize + 1;
-
-      const baseQuery = db
+      const rows = await db
         .select({
           ...selectColumns,
           // decisions/0059-generated-document-names.md - see `counterpartyName`'s own
@@ -280,28 +302,10 @@ export function createDrizzleDocumentRepository(db: DbExecutor): DocumentReposit
           statementLastBooking,
         })
         .from(documents)
-        .where(and(...conditions))
+        .where(where)
+        .orderBy(...orderBy)
         .limit(limit)
         .offset(offset);
-
-      // A `ts_rank` order alone has no deterministic tie-break: two documents with the
-      // exact same rank (a very common case - e.g. neither has a search-relevant field
-      // populated yet) had no guaranteed relative order between them, so offset pagination
-      // could skip or duplicate a row across pages depending on the plan Postgres happened
-      // to pick (P6 review finding A8). `created_at desc, id desc` behind it makes the full
-      // order deterministic (createdAt alone is still not quite enough: two documents
-      // created in the same transaction can share a timestamp, hence `id` as the final
-      // tie-break).
-      // decisions/0058-inbox-sorts-by-the-document-s-own-date.md: the inbox is ordered by the
-      // date the document itself carries - `documentEffectiveDate`, the one shared expression
-      // the Abschluss scopes its period by too (decisions/0066-abschluss-check-and-export.md),
-      // so the two can never disagree about which month a document belongs to.
-      const primaryOrder =
-        filter.sort === "uploaded" ? [desc(documents.createdAt)] : [desc(documentEffectiveDate), desc(documents.createdAt)];
-
-      const rows = rank
-        ? await baseQuery.orderBy(desc(rank), ...primaryOrder, desc(documents.id))
-        : await baseQuery.orderBy(...primaryOrder, desc(documents.id));
 
       const hasMore = rows.length > filter.pageSize;
       const page = hasMore ? rows.slice(0, filter.pageSize) : rows;
@@ -320,6 +324,38 @@ export function createDrizzleDocumentRepository(db: DbExecutor): DocumentReposit
         })),
         hasMore,
       };
+    },
+
+    async listSummaries(workspaceId, filter) {
+      const { where, orderBy, limit, offset } = listPlan(workspaceId, filter);
+      const rows = await db
+        .select({
+          id: documents.id,
+          title: documents.title,
+          originalFileName: documents.originalFileName,
+          sender: documents.sender,
+          counterpartyName,
+          status: documents.status,
+          kind: documents.kind,
+          direction: documents.direction,
+          intakeStatus: documents.intakeStatus,
+          documentDate: documents.documentDate,
+          effectiveDate: documentEffectiveDate,
+          invoiceNumber: documents.invoiceNumber,
+          totalAmountCents: documents.totalAmountCents,
+          currency: documents.currency,
+          dueDate: documents.dueDate,
+          paymentStatus: effectivePaymentStatus,
+          paidAt: documents.paidAt,
+          createdAt: documents.createdAt,
+        })
+        .from(documents)
+        .where(where)
+        .orderBy(...orderBy)
+        .limit(limit)
+        .offset(offset);
+      const hasMore = rows.length > filter.pageSize;
+      return { items: hasMore ? rows.slice(0, filter.pageSize) : rows, hasMore };
     },
 
     async deleteById(workspaceId, id) {
