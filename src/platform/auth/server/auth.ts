@@ -24,13 +24,17 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
-import { magicLink } from "better-auth/plugins";
+import { jwt, magicLink } from "better-auth/plugins";
+import { cimd } from "@better-auth/cimd";
+import { fetchClientMetadataResource } from "@better-auth/cimd/node";
+import { mcp } from "@better-auth/mcp";
 
 import { findSignInEligibility, getAuthDb, authSchema } from "@/persistence/composition/auth-database";
 import { createSmtpMailer } from "@/platform/mailer/server";
 import { serverEnv } from "@/platform/env/server";
 
 import { MAGIC_LINK_EMAIL_SUBJECT, renderMagicLinkEmail } from "./emails/magic-link-email";
+import { MCP_ACCESS_TOKEN_EXPIRES_IN_SECONDS, MCP_OAUTH_SCOPES, mcpResourceUrl, OAUTH_CONSENT_PAGE, OAUTH_LOGIN_PAGE } from "./oauth-config";
 import { mayCreateAccount, mayReceiveMagicLink, parseBootstrapEmails } from "./sign-up-gate";
 
 /** decisions/0074: the error code the magic-link verify endpoint redirects to `/login` with
@@ -92,9 +96,41 @@ function buildAuth() {
         storeToken: "hashed",
         rateLimit: MAGIC_LINK_RATE_LIMIT,
       }),
+      // decisions/0078-mcp-server.md: the OAuth 2.1 authorization server for the remote MCP
+      // server. `jwt()` holds the signing keys (`/api/auth/jwks`) the MCP route verifies access
+      // tokens against; its own session-JWT endpoint (`/token`) is disabled below, nothing
+      // here needs it.
+      jwt(),
+      mcp({
+        resource: mcpResourceUrl(env.APP_URL),
+        // A signed-out user is sent to `/oauth/login` with the signed authorize query, which
+        // hands off to the ordinary `/login` page (magic link, invitation-only sign-up,
+        // decisions/0074) with `next=` pointing back at the authorize endpoint.
+        loginPage: OAUTH_LOGIN_PAGE,
+        consentPage: OAUTH_CONSENT_PAGE,
+        scopes: [...MCP_OAUTH_SCOPES],
+        // Short-lived JWT access tokens. The MCP route additionally checks the grant on every
+        // request, so revoking a connection does not have to wait for this to run out.
+        accessTokenExpiresIn: MCP_ACCESS_TOKEN_EXPIRES_IN_SECONDS,
+        // Open to every standards-compliant MCP client, no allowlist (user decision 5):
+        // RFC 7591 dynamic registration for clients without a Client ID Metadata Document,
+        // plus CIMD below. Registration is rate limited per IP (`rateLimit.register`).
+        allowDynamicClientRegistration: true,
+        allowUnauthenticatedClientRegistration: true,
+        // Cursor and older Claude Code omit `application_type` with a loopback or
+        // custom-scheme redirect URI; "infer" treats those as native clients without
+        // loosening the rules for web clients.
+        clientRegistrationDefaultApplicationType: "infer",
+        rateLimit: { register: { window: 60 * 60, max: 20 } },
+      }),
+      cimd({ fetchClientMetadataResource, metadataProfile: "mcp-2026-07-28" }),
       // Must be last: lets Server Actions (the login form's Server Action) set cookies.
       nextCookies(),
     ],
+    // `jwt()`'s session-to-JWT endpoint: not used anywhere, and a token from it is never
+    // accepted by the MCP route (wrong audience, no `azp`, no scope) - disabled so it is not
+    // even reachable.
+    disabledPaths: ["/token"],
     rateLimit: {
       enabled: true,
       storage: "database",

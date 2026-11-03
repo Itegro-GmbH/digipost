@@ -20,7 +20,8 @@ Maintenance triggers:
   contacts and proposals arrive from a real document, not just from an e2e fixture
 - The list read model's known N+1 gap (see "Known gaps" below) is closed by a future,
   count-bearing addition to `ContactUseCases.listForWorkspace`
-Last verified: 2026-09-20, F5 (hardening, decisions/0027-hardening-and-deletion.md): a
+Last verified: 2026-11-03, decisions/0078-mcp-server.md: added `listContactSummariesProjection`
+(the MCP server's N+1-free contact search). Previously 2026-09-20, F5 (hardening, decisions/0027-hardening-and-deletion.md): a
 defense-in-depth fix from the adversarial review pass - `DocumentContactRepository.listForDocument`/
 `listForContact` (`src/persistence/repositories/{contracts,drizzle}/contacts-repository.ts`)
 now take `workspaceId` and enforce it with an explicit join filter (to `documents`/`contacts`
@@ -193,7 +194,9 @@ its existing callers/tests. Nothing calls `replaceDocumentLinks` yet: switching
   own German confirmation dialog, turning a mistaken contact into a company-profile alias/IBAN
   before deleting it). Both 404 for a contact/route outside the caller's own workspace, same
   pattern as the documents module's own pages.
-- **`server.ts`** (new): `listContactsProjection`, `getContactDetailProjection`,
+- **`server.ts`** (new): `listContactsProjection`, `listContactSummariesProjection`
+  (decisions/0078-mcp-server.md: the MCP server's contact search, one query without the per-row
+  `getById` below, a caller-chosen page size), `getContactDetailProjection`,
   `listMergeOptionsProjection`, `listPendingProposalsSummaryProjection`,
   `CONTACTS_PAGE_SIZE` - all in `server/read-models.ts`, calling only
   `getRequestServices().contacts`/`.workspaces` (via `@/modules/workspaces/server`'s

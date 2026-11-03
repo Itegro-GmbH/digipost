@@ -64,6 +64,7 @@ export type {
   DocumentRow,
   DocumentStatus,
   DocumentWithRelations,
+  DocumentSummaryRow,
   ListDocumentsFilter,
   ListDocumentsResult,
   MarkDocumentDoneInput,

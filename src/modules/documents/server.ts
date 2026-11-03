@@ -24,3 +24,5 @@ export { DOCUMENT_STATUSES, type DocumentStatus } from "@/persistence/repositori
 // `/dashboard/settings/intake` and confirmation-UI read models.
 export { processIntakeUpload, type ProcessedIntakeUpload, type ProcessIntakeUploadResult, type StructuredUpload } from "./core/intake-upload-processing";
 export { getDocumentIntakeConfirmationProjection, listIntakeFingerprintsProjection } from "./server/read-models";
+// decisions/0078-mcp-server.md: the MCP server's lean search and its download link.
+export { getDocumentDownloadUrlProjection, listDocumentSummariesProjection, type DocumentSummaryItem } from "./server/read-models";

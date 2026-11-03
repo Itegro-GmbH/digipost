@@ -9,7 +9,9 @@ Maintenance triggers:
 - Repository-wide safety or workflow rules change
 - STRUCTURE.md or the structure checker lands and changes what is machine-enforced
 - Documentation governance rules in DOC_RULES.md change
-Last verified: 2026-10-22, decisions/0075-email-intake.md: added the `src/modules/mail-intake`
+Last verified: 2026-11-03, decisions/0078-mcp-server.md: added the `src/modules/mcp` owner, the
+MCP server under "Workspace scoping" (not an exception: the token's user, `resolveAccess`), and
+AI clients to the "Mistral and personal data" rule. Previously 2026-10-22, decisions/0075-email-intake.md: added the `src/modules/mail-intake`
 + `src/platform/inbound-mail` owners, the webhook's workspace-scoping exception, and Resend to
 the "Mistral and personal data" rule. Previously 2026-09-20, F5 (hardening): refreshed the owners list (added
 `src/modules/{intake,contacts,accounts,payments}`, all missing since their own phases
@@ -96,6 +98,12 @@ detail; `decisions/README.md` indexes the ADR behind each one):
   every attachment turned into a document through `createFromUpload`;
   `src/platform/inbound-mail` is the only holder of `RESEND_API_KEY`/`RESEND_WEBHOOK_SECRET`,
   decisions/0075-email-intake.md.
+- `src/modules/mcp` - the remote MCP server (`/api/mcp`): the tool catalog, per-call permission
+  enforcement and audit line, "KI-Verbindungen" (`/dashboard/settings/ai-clients`) and the OAuth
+  consent form. Its OAuth 2.1 authorization server (Better Auth `jwt()`/`mcp()`/`cimd()`, token
+  verification, grants, rate limit) lives in `src/platform/auth`; tool calls run as the token's
+  user through `src/platform/access`'s `runAsDelegatedPrincipal` and the owning modules' own
+  read models and Server Actions, decisions/0078-mcp-server.md.
 - `src/modules/dashboard-shell`, `src/modules/sign-in`, `src/platform/auth`,
   `src/platform/mailer`, `src/platform/api-pipeline`, `src/platform/observability`,
   `src/platform/env`, `src/persistence`, `src/shared/ui-primitives`, `src/i18n` - the
@@ -126,7 +134,14 @@ Digipost-specific invariants a change must not silently break:
   mail the whole account receives there, so a recipient counts only when it is exactly
   `post-<token>@<INBOUND_EMAIL_DOMAIN>` with an existing, enabled token; anything else is
   answered 200 and never stored (no row, no job, no download, no PII in logs). Never loosen
-  that match.
+  that match. The MCP server (`/api/mcp`, decisions/0078-mcp-server.md) is NOT an exception: its
+  caller is the verified OAuth token's user, and every tool call resolves its workspace through
+  `resolveAccess` among that user's memberships (`runAsDelegatedPrincipal`), where a tool's
+  `workspaceId` argument is client input exactly like the active-workspace cookie - it only
+  selects, and an id that is not a membership is refused, never silently replaced. A new MCP
+  tool calls the owning module's read model or Server Action, declares the dashboard's own
+  permission for the same capability, and gets a row in
+  `src/modules/mcp/tests/tool-permissions.test.ts`.
 - **Quota semantics.** The total-document limit counts documents currently stored
   (deleting one frees capacity); the monthly limit counts documents created in the
   current calendar month UTC (deleting does not refund it); a one-off package raises the
@@ -197,6 +212,9 @@ Digipost-specific invariants a change must not silently break:
   no DPA with Resend exists yet and its data residency is unclear, so real customer mail
   through that path is blocked on the same paperwork. `RESEND_API_KEY`/`RESEND_WEBHOOK_SECRET`
   fall under the same "never read, opened, or created by an agent" rule as `MISTRAL_API_KEY`.
+  Data a user lets a connected AI client read through the MCP server leaves Digipost for that
+  client's provider by the user's own, revocable choice (decisions/0078-mcp-server.md); the
+  privacy policy must say so before real users connect clients.
 
 ## Workflow
 

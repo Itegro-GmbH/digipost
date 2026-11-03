@@ -73,6 +73,64 @@ export async function listDocumentsProjection(workspaceId: string, params: ListD
   return { items, hasMore: result.hasMore, page: params.page };
 }
 
+/** decisions/0078-mcp-server.md: one compact row of the MCP server's document search. */
+export type DocumentSummaryItem = {
+  id: string;
+  title: string | null;
+  originalFileName: string;
+  sender: string | null;
+  counterpartyName: string | null;
+  status: string;
+  kind: string;
+  direction: string | null;
+  intakeStatus: string;
+  documentDate: string | null;
+  effectiveDate: string;
+  invoiceNumber: string | null;
+  totalAmountCents: number | null;
+  currency: string | null;
+  dueDate: string | null;
+  paymentStatus: string;
+  paidAt: string | null;
+  createdAt: string;
+};
+
+/**
+ * decisions/0078-mcp-server.md: the inbox's filters, order and paging (`ListDocumentsParams`),
+ * but the lean column set (`DocumentRepository.listSummaries`: one query, no OCR text, no
+ * intake payload) and a caller-chosen page size. The same fields the inbox row shows a member,
+ * no more - so no finance redaction applies here either.
+ */
+export async function listDocumentSummariesProjection(
+  workspaceId: string,
+  params: ListDocumentsParams & { pageSize: number },
+): Promise<{ items: DocumentSummaryItem[]; hasMore: boolean; page: number }> {
+  const result = await getRequestServices().documents.listSummaries(workspaceId, {
+    q: params.q,
+    status: params.status,
+    direction: params.direction,
+    kind: params.kind,
+    paymentStatus: params.paymentStatus,
+    sort: params.sort,
+    intakeStatus: params.intakeStatus,
+    from: params.from,
+    to: params.to,
+    page: params.page,
+    pageSize: params.pageSize,
+  });
+  return {
+    items: result.items.map((row) => ({ ...row, paidAt: row.paidAt ? row.paidAt.toISOString() : null, createdAt: row.createdAt.toISOString() })),
+    hasMore: result.hasMore,
+    page: params.page,
+  };
+}
+
+/** decisions/0078-mcp-server.md: a short-lived presigned download link for one document of
+ * this workspace (the caller checked `documents.read`), or `null` when it does not exist here. */
+export async function getDocumentDownloadUrlProjection(workspaceId: string, id: string, expiresInSeconds: number) {
+  return getRequestServices().documents.getDownloadUrl(workspaceId, id, expiresInSeconds);
+}
+
 /** `null` when the document does not exist in this workspace - the `[id]` page 404s. */
 export const getDocumentDetailProjection = cache(
   async (workspaceId: string, id: string): Promise<DocumentDetailView | null> => {

@@ -15,7 +15,12 @@ Maintenance triggers:
 - A new vendor SDK or a new sensitive env var is introduced
 - `scripts/structure/**` gains or loses a rule (keep the rule table and the
   ```structure block names in 1:1 correspondence, enforced by the checker itself)
-Last verified: 2026-11-03, `project.yaml` (the Itegro project index manifest, added on `main`
+Last verified: 2026-11-03, decisions/0078-mcp-server.md added `src/modules/mcp` as a new owner
+under the existing container rule, the `vendor-sdk` rows `@better-auth/` (confined to
+`src/platform/auth/` like `better-auth` itself) and `@modelcontextprotocol/` (confined to
+`src/modules/mcp/`), and `src/platform/auth/server/oauth-grants.ts` as a second importer of the
+auth-database narrow entry; `src/app/.well-known/**` and `src/app/(auth)/oauth/**` use only
+existing seam names. Earlier the same day, `project.yaml` (the Itegro project index manifest, added on `main`
 on 2026-10-25) declared as a root entry; it failed this check once `main` was tested together
 with `development`. Previously, 2026-10-22, decisions/0075-email-intake.md added two owners under the
 existing container rules, `src/modules/mail-intake` (the E-Mail-Eingang's domain, UI and
@@ -263,11 +268,14 @@ an owner, an importer, and a reason (`WEBAPP_TEMPLATE_SPEC.md` §5.1):
 ```structure narrow-entry
 target   src/persistence/composition/auth-database.ts
 owner    persistence
-importer src/platform/auth/server/auth.ts
+importer src/platform/auth/server/auth.ts, src/platform/auth/server/oauth-grants.ts
 reason   Better Auth's Drizzle adapter needs the Drizzle instance and the raw auth
          schema object directly for its own adapter; the rest of the persistence
          graph (use cases, the Unit of Work) does not belong in auth
          initialization (decisions/0005-better-auth-magic-link-drizzle-adapter.md).
+         The MCP server's OAuth grant checks (consent lookup, usage and rate-limit
+         upsert, revocation) read and write the same `auth` tables
+         (decisions/0078-mcp-server.md).
 ```
 
 `src/proxy.ts` is a stricter special case than ordinary root config: it must import
@@ -524,6 +532,8 @@ purpose) or non-sensitive test/build plumbing.
 drizzle-orm       src/persistence/
 pg                src/persistence/foundation/, scripts/db/, tests/e2e/helpers/
 better-auth       src/platform/auth/
+@better-auth/     src/platform/auth/
+@modelcontextprotocol/ src/modules/mcp/
 @sentry/          src/instrumentation.ts, src/instrumentation-client.ts, src/sentry.server.config.ts, src/sentry.edge.config.ts, next.config.ts, src/platform/observability/
 nodemailer        src/platform/mailer/
 @react-email/     src/platform/auth/server/emails/, src/platform/mailer/, src/modules/workspaces/server/emails/, src/modules/documents/server/emails/, src/modules/billing/server/emails/, src/modules/mail-intake/server/emails/

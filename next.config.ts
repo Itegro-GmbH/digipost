@@ -76,6 +76,28 @@ const PERMISSIONS_POLICY = [
   "interest-cohort=()",
 ].join(", ");
 
+const MCP_CORS_PATHS = [
+  "/api/mcp",
+  "/.well-known/:path*",
+  "/api/auth/.well-known/:path*",
+  "/api/auth/jwks",
+  "/api/auth/oauth2/token",
+  "/api/auth/oauth2/register",
+  "/api/auth/oauth2/revoke",
+  "/api/auth/oauth2/userinfo",
+];
+
+const MCP_CORS_HEADERS = [
+  { key: "Access-Control-Allow-Origin", value: "*" },
+  { key: "Access-Control-Allow-Methods", value: "GET, POST, DELETE, OPTIONS" },
+  {
+    key: "Access-Control-Allow-Headers",
+    value: "authorization, content-type, accept, dpop, mcp-protocol-version, mcp-session-id, last-event-id",
+  },
+  { key: "Access-Control-Expose-Headers", value: "www-authenticate, mcp-session-id, mcp-protocol-version, retry-after, dpop-nonce" },
+  { key: "Access-Control-Max-Age", value: "600" },
+];
+
 // Next blocks cross-origin requests to dev-only resources (HMR, dev chunks) from any host but
 // the one it started on, which leaves a page served through a tunnel (APP_URL pointing at e.g.
 // a Cloudflare quick tunnel) unhydrated: forms fall back to a native GET submit. Allowing
@@ -96,6 +118,14 @@ const nextConfig: NextConfig = {
 
   async headers() {
     return [
+      // decisions/0078-mcp-server.md: CORS for browser-based MCP clients, on exactly the
+      // endpoints such a client calls without cookies - the MCP route (bearer token), OAuth/OIDC
+      // discovery, the JWKS, and the token/registration/revocation/userinfo endpoints. `*` and
+      // never `Access-Control-Allow-Credentials`: none of these accepts a cookie as credential, so
+      // a foreign origin gains nothing it could not already do from a server. The authorize and
+      // consent endpoints (session cookie) are deliberately NOT listed. Next answers the CORS
+      // preflight (`OPTIONS`) itself for these routes, with these headers.
+      ...MCP_CORS_PATHS.map((source) => ({ source, headers: MCP_CORS_HEADERS })),
       {
         source: "/(.*)",
         headers: [

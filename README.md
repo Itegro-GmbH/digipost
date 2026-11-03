@@ -13,7 +13,9 @@ Maintenance triggers:
 - A new top-level owner root (`src/modules/`, `src/persistence/`, ...) is populated for the first
   time
 - `.github/workflows/ci.yml` changes what runs or when
-Last verified: 2026-10-22, decisions/0075-email-intake.md: added the "E-Mail-Eingang" feature
+Last verified: 2026-11-03, decisions/0078-mcp-server.md: added the "MCP server for AI clients"
+feature bullet and item 5a of "Before going to production" (no new environment variable).
+2026-10-22, decisions/0075-email-intake.md: added the "E-Mail-Eingang" feature
 bullet, its four environment variables, and item 5 of "Before going to production" (Resend as
 a sub-processor). 2026-10-21, decisions/0073-public-repo-and-production-pipeline.md: rewrote "CI" (GitHub-hosted
 runners, the Docker-backed suites back on), added "Deployment" and "License", rewrote the deploy-related
@@ -129,6 +131,17 @@ What exists today, as vertical slices:
   number, sender, and amount, on a different file - a re-scan or a re-sent PDF) gets a
   "möglicherweise doppelt" hint linking to the earlier one; nothing is ever deleted
   automatically.
+- **MCP server for AI clients** (`src/modules/mcp`, `src/platform/auth`,
+  decisions/0078-mcp-server.md): a user enters `<APP_URL>/api/mcp` into any standards-compliant
+  AI client (Claude, ChatGPT, Cursor, ...), signs in through the ordinary `/login` and consents
+  on `/oauth/consent`; the AI then works with documents, contacts, intake proposals and (for
+  admins) accounts, payment matching and the Abschluss check, with exactly the user's own
+  permissions and the dashboard's own Server Actions. Digipost is its own OAuth 2.1
+  authorization server (Better Auth: dynamic client registration and Client ID Metadata
+  Documents, PKCE, audience-bound 15-minute access tokens). "Verwaltung > KI-Verbindungen"
+  (`/dashboard/settings/ai-clients`) shows the MCP URL and every connected client, and
+  disconnects one immediately. Not offered: workspace deletion, member management, billing,
+  E-Mail-Eingang settings, upload.
 - **Accounts and transactions, admin-only** (`src/modules/accounts`,
   decisions/0024-accounts-and-transactions.md): the moment a bank statement (camt.053, or a
   confirmed CSV/TSV mapping) is confirmed, its transactions are imported into a workspace's
@@ -640,6 +653,14 @@ noted, before that changes.
    (decisions/0075-email-intake.md). The Resend Free tier (100 mails per day, shared by magic
    links and the E-Mail-Eingang's admin notices) is fine for internal use only. Setup:
    `scripts/deploy/README.md`, section 7.
+5a. **AI clients through the MCP server: the privacy policy must say so.** Data a user lets a
+   connected AI client read (`/api/mcp`, decisions/0078-mcp-server.md) is processed by that
+   client's provider. It is the user's own choice, made on the consent page and revocable at any
+   time, and Digipost has no contract with those providers; the privacy policy has to state this
+   before real users connect clients. Operationally: the app must reach its own public
+   `APP_URL` (the MCP route fetches `/api/auth/jwks` from it), and the document download link is
+   a presigned URL of the storage endpoint, so `S3_ENDPOINT` must be publicly reachable for it to
+   work (it is for Cloudflare R2).
 6. **Stripe is still missing.** `src/modules/billing`'s `PaymentProvider` port has only a
    test-mode adapter; tier changes and package purchases work today solely because
    `BILLING_TEST_MODE=true` in local/test environments. `BILLING_TEST_MODE` must stay

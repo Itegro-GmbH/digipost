@@ -154,6 +154,34 @@ export function createFakeDocumentRepository(
       };
     },
 
+    // decisions/0078-mcp-server.md: the lean projection of `list` above, same filter and order.
+    async listSummaries(workspaceId, filter: ListDocumentsFilter) {
+      const result = await this.list(workspaceId, filter);
+      return {
+        items: result.items.map((r) => ({
+          id: r.id,
+          title: r.title,
+          originalFileName: r.originalFileName,
+          sender: r.sender,
+          counterpartyName: r.counterpartyName,
+          status: r.status,
+          kind: r.kind,
+          direction: r.direction,
+          intakeStatus: r.intakeStatus,
+          documentDate: r.documentDate,
+          effectiveDate: fakeEffectiveDate(r),
+          invoiceNumber: r.invoiceNumber,
+          totalAmountCents: r.totalAmountCents,
+          currency: r.currency,
+          dueDate: r.dueDate,
+          paymentStatus: r.paymentStatus,
+          paidAt: r.paidAt,
+          createdAt: r.createdAt,
+        })),
+        hasMore: result.hasMore,
+      };
+    },
+
     async deleteById(workspaceId, id) {
       const index = rows.findIndex((r) => r.id === id && r.workspaceId === workspaceId);
       if (index === -1) return null;
