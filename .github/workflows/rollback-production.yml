@@ -32,7 +32,7 @@ env:
 jobs:
   rollback:
     name: Roll production back
-    if: ${{ github.repository == 'ExpidetGames/digipost' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.repository == 'Itegro-GmbH/digipost' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: production

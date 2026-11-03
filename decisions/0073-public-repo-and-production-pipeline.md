@@ -74,7 +74,7 @@ health check, Infisical for secrets). This decision adopts it, adapted to a sing
    `main` starts `.github/workflows/deploy-production.yml` (also startable by hand on `main`):
    `fresh` -> `migrate` -> `stage` -> `health` -> `promote` -> `record`.
    - Concurrency group `deploy-production`, never cancelled: a migration in progress runs to its end.
-   - Every job is guarded by `github.repository == 'ExpidetGames/digipost' && github.ref == 'refs/heads/main'`.
+   - Every job is guarded by `github.repository == 'Itegro-GmbH/digipost' && github.ref == 'refs/heads/main'`.
      The guard only protects against accidents; the security boundary is the GitHub environment `production`,
      whose deployment branches are restricted to `main` (a setting no workflow can verify, so the setup guide
      says how to check it).

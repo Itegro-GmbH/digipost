@@ -93,7 +93,7 @@ Production stays on its previous deployment until `promote`. Runs queue one behi
 only the newest waiting run: a run that is waiting when a newer push arrives is cancelled, and the newer run
 deploys the newer commit.
 
-Every job runs only for `ExpidetGames/digipost` on `refs/heads/main`. That condition guards against accidents; the
+Every job runs only for `Itegro-GmbH/digipost` on `refs/heads/main`. That condition guards against accidents; the
 security boundary is the GitHub environment `production` (section 3). A job that needs a secret runs in that
 environment. Secrets are passed explicitly to composite actions, and nothing uses `secrets: inherit`.
 
@@ -162,8 +162,8 @@ The CI test jobs use no secret at all; their database, mail and storage values a
 
 ## 3. One-time setup: GitHub
 
-Repository `ExpidetGames/digipost` (if the owner or name is different, change the guard condition in the three
-workflow files and `check-current-commit`'s callers: search for `ExpidetGames/digipost`).
+Repository `Itegro-GmbH/digipost` (if the owner or name is different, change the guard condition in the three
+workflow files and `check-current-commit`'s callers: search for `Itegro-GmbH/digipost`).
 
 1. **Environment `production`** (Settings, Environments). Deployment branches and tags: *Selected branches and
    tags*, only the branch `main`. **This rule is the security boundary.** Every job that signs in to Infisical
