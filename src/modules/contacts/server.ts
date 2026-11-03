@@ -10,6 +10,8 @@ export {
   CONTACTS_PAGE_SIZE,
   getContactDetailProjection,
   listContactsProjection,
+  listContactSummariesProjection,
+  type ContactSummaryItem,
   listMergeOptionsProjection,
   listPendingProposalsSummaryProjection,
   type ListContactsParams,

@@ -327,6 +327,7 @@
       "team": "Team",
       "companySettings": "Firmendaten",
       "intakeSettings": "Erkannte Quellen",
+      "aiClients": "KI-Verbindungen",
       "billing": "Tarif & Nutzung"
     },
     "workspaceSwitcher": {
@@ -1565,5 +1566,52 @@
       "forbidden": "Nur die Administration kann den E-Mail-Eingang verwalten.",
       "unknown": "Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut."
     }
+  },
+  "AiClients": {
+    "heading": "KI-Verbindungen",
+    "description": "KI-Anwendungen wie Claude, ChatGPT oder Cursor können mit Ihrer Zustimmung auf Digipost zugreifen. Hier sehen Sie, welche Anwendungen verbunden sind, und können jede Verbindung trennen.",
+    "howToHeading": "So verbinden Sie Ihre KI",
+    "howToStep1": "Fügen Sie in Ihrer KI-Anwendung einen neuen Connector bzw. MCP-Server hinzu.",
+    "howToStep2": "Geben Sie diese Adresse ein:",
+    "howToStep3": "Melden Sie sich im sich öffnenden Browserfenster mit Ihrem Digipost-Konto an und bestätigen Sie den Zugriff.",
+    "howToPermissions": "Die KI handelt in Ihrem Namen und mit genau Ihren Rechten: Was Sie im Dashboard nicht dürfen, darf sie auch nicht. Sie kann Daten lesen und ändern, aber keine Arbeitsbereiche löschen, keine Mitglieder verwalten und den Tarif nicht ändern.",
+    "howToDataNotice": "Inhalte, die die KI abruft, werden an den Anbieter der KI-Anwendung übertragen. Verbinden Sie nur Anwendungen, denen Sie diese Daten anvertrauen.",
+    "copy": "Kopieren",
+    "copied": "Kopiert",
+    "listHeading": "Verbundene Anwendungen",
+    "empty": "Noch keine KI-Anwendung verbunden.",
+    "unnamedClient": "Unbenannte Anwendung",
+    "connectedAt": "Verbunden am {date}",
+    "lastUsedAt": "zuletzt genutzt am {date}",
+    "neverUsed": "noch nicht genutzt",
+    "clientId": "Client-ID: {id}",
+    "revoke": "Verbindung trennen",
+    "revokeConfirm": "Wirklich trennen? Die Anwendung verliert sofort den Zugriff.",
+    "revokeConfirmYes": "Ja, trennen",
+    "revokePending": "Wird getrennt…",
+    "revokeFailed": "Die Verbindung konnte nicht getrennt werden. Bitte versuchen Sie es erneut.",
+    "cancel": "Abbrechen"
+  },
+  "OAuthConsent": {
+    "heading": "{client} mit Digipost verbinden?",
+    "signedInAs": "Angemeldet als {email}.",
+    "grantsIntro": "{client} erhält folgende Rechte:",
+    "scopes": {
+      "openid": "Ihre Identität bestätigen",
+      "profile": "Ihren Namen sehen",
+      "email": "Ihre E-Mail-Adresse sehen",
+      "offline_access": "Verbunden bleiben, bis Sie die Verbindung trennen",
+      "digipost": "Ihre Digipost-Daten lesen und ändern, in Ihrem Namen und mit genau Ihren Rechten"
+    },
+    "workspaces": "Zugriff auf Ihre Arbeitsbereiche: {names}",
+    "noWorkspace": "Sie gehören noch zu keinem Arbeitsbereich. Die Anwendung kann erst etwas sehen, wenn Sie einem Arbeitsbereich angehören.",
+    "dataNotice": "Inhalte, die {client} abruft, werden an den Anbieter dieser Anwendung übertragen. Arbeitsbereiche löschen, Mitglieder verwalten und den Tarif ändern kann die Anwendung nicht.",
+    "clientId": "Client-ID: {id}",
+    "unnamedClient": "Eine unbenannte Anwendung",
+    "accept": "Zulassen",
+    "deny": "Ablehnen",
+    "failed": "Das hat nicht geklappt. Bitte versuchen Sie es erneut.",
+    "invalidRequest": "Diese Anfrage ist ungültig oder abgelaufen. Bitte starten Sie die Verbindung in Ihrer KI-Anwendung erneut.",
+    "revokeHint": "Sie können die Verbindung jederzeit unter Verwaltung > KI-Verbindungen trennen."
   }
 }

@@ -26,6 +26,7 @@ vi.mock("next/headers", () => ({
 import { getCurrentUser } from "@/platform/auth/server";
 import { PERMISSIONS } from "@/platform/access";
 import { getWorkspaceAccess, resolveAccess } from "@/platform/access/server/get-workspace-access";
+import { runAsDelegatedPrincipal } from "@/platform/access/server/delegated-principal";
 
 const USER = { id: "u1", email: "admin@example.test" };
 
@@ -168,5 +169,50 @@ describe("getWorkspaceAccess", () => {
       status: "ok",
       access: { permissions: [PERMISSIONS.documentsRead, PERMISSIONS.documentsWrite] },
     });
+  });
+});
+
+// decisions/0078-mcp-server.md: an MCP tool call runs as the OAuth token's user, never as the
+// session cookie's, and the workspace it names is only ever SELECTED among that user's own
+// memberships - with no silent fallback to another workspace.
+describe("getWorkspaceAccess inside a delegated (MCP) principal", () => {
+  const TOKEN_USER = { id: "u-token", email: "token@example.test" };
+
+  it("resolves the token's user and never consults the session or the cookie", async () => {
+    vi.mocked(getCurrentUser).mockReset();
+    vi.mocked(getCurrentUser).mockRejectedValue(new Error("the session must not be read"));
+    cookieValue = SECOND.workspace.id;
+    listMembershipsForUser.mockResolvedValue([OLDEST, SECOND]);
+
+    const result = await runAsDelegatedPrincipal({ user: TOKEN_USER, clientId: "client-1" }, () => getWorkspaceAccess());
+
+    expect(listMembershipsForUser).toHaveBeenCalledWith(TOKEN_USER.id);
+    expect(getCurrentUser).not.toHaveBeenCalled();
+    // Default = oldest membership; the cookie naming SECOND is ignored.
+    expect(result).toMatchObject({ status: "ok", access: { user: TOKEN_USER, workspace: { id: OLDEST.workspace.id }, role: "admin" } });
+  });
+
+  it("selects the named workspace with that workspace's own role", async () => {
+    listMembershipsForUser.mockResolvedValue([OLDEST, SECOND]);
+
+    const result = await runAsDelegatedPrincipal({ user: TOKEN_USER, clientId: "c", workspaceId: SECOND.workspace.id }, () => getWorkspaceAccess());
+
+    expect(result).toMatchObject({ status: "ok", access: { workspace: { id: SECOND.workspace.id }, role: "member" } });
+  });
+
+  it("refuses a workspace that is not one of the user's memberships instead of falling back", async () => {
+    listMembershipsForUser.mockResolvedValue([OLDEST, SECOND]);
+
+    const result = await runAsDelegatedPrincipal({ user: TOKEN_USER, clientId: "c", workspaceId: FOREIGN_WORKSPACE_ID }, () => getWorkspaceAccess());
+
+    expect(result).toEqual({ status: "error", errorCode: "no_workspace" });
+  });
+
+  it("does not leak the principal outside its own call chain", async () => {
+    vi.mocked(getCurrentUser).mockReset();
+    vi.mocked(getCurrentUser).mockResolvedValue(null);
+    await runAsDelegatedPrincipal({ user: TOKEN_USER, clientId: "c" }, async () => undefined);
+
+    await expect(getWorkspaceAccess()).resolves.toEqual({ status: "error", errorCode: "unauthenticated" });
   });
 });

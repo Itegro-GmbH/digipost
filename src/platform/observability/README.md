@@ -15,7 +15,8 @@ Maintenance triggers:
 - `SENTRY_DSN`/`SENTRY_AUTH_TOKEN`/`NEXT_PUBLIC_SENTRY_DSN` naming changes
 - A new URL path carries a secret/token (like `/invite/<token>`) and needs the same
   redaction treatment
-Last verified: 2026-09-20, P7 (D3, real-API defect fixes): added `server.ts`/`server/capture-error.ts`'s
+Last verified: 2026-11-03, decisions/0078-mcp-server.md: added `logAuditEvent`
+(`server/audit-log.ts`), the MCP server's per-tool-call audit line. Previously 2026-09-20, P7 (D3, real-API defect fixes): added `server.ts`/`server/capture-error.ts`'s
 `captureError` - a background job failure (`src/persistence/use-cases/jobs-use-cases.ts`)
 never crosses a Next.js request boundary, so `src/instrumentation.ts`'s `onRequestError`
 never sees it; without an explicit call like this one it would never reach Sentry no matter
@@ -50,6 +51,11 @@ makes "no DSN" a true no-op.
   only `src/persistence/use-cases/jobs-use-cases.ts`'s terminal job failures (D3). `context`
   becomes the Sentry event's `extra` data: callers pass only small, already-stable
   identifiers/codes, never document content, personal data, or a credential.
+  `logAuditEvent(event, fields)` (decisions/0078-mcp-server.md): one JSON line on stdout per
+  action taken on a user's behalf by something other than their own browser - first consumer:
+  the MCP server, one line per tool call (`src/modules/mcp/server/execute-tool.ts`). `fields`
+  only takes primitives, so a whole object cannot slip in; the same "identifiers and codes only"
+  rule applies.
 
 ## Structure
 
@@ -74,6 +80,7 @@ makes "no DSN" a true no-op.
 - `tests/sentry-config-no-op.test.ts` - the same "no-op without DSN" proof for the actual
   `src/sentry.server.config.ts`/`src/sentry.edge.config.ts` files, with `@sentry/nextjs`
   mocked.
+- `server/audit-log.ts` (published through `server.ts`) - `logAuditEvent`, never throws.
 - `server/capture-error.ts` (published through `server.ts`) - `captureError`: gates on
   `serverEnv().SENTRY_DSN`, calls `Sentry.captureException(error, { extra: context })`, never
   throws itself (a failure to report to Sentry is logged with `console.error` and swallowed -

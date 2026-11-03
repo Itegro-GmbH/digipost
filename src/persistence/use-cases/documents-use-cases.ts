@@ -101,6 +101,7 @@ import type {
   DocumentRow,
   DocumentStatus,
   DocumentWithRelations,
+  DocumentSummaryRow,
   IntakeFingerprintRow,
   Repositories,
   UnitOfWork,
@@ -304,6 +305,9 @@ export interface DocumentUseCases {
     items: (Document & { counterpartyName: string | null; reportPeriod: string | null; statementLastBooking: string | null })[];
     hasMore: boolean;
   }>;
+  /** decisions/0078-mcp-server.md: the lean result list (`DocumentRepository.listSummaries`),
+   * same filters and order as `list`. */
+  listSummaries(workspaceId: string, filter: ListDocumentsInput): Promise<{ items: DocumentSummaryRow[]; hasMore: boolean }>;
   getById(workspaceId: string, id: string): Promise<Document | null>;
   /** Documents currently stored (any status) - the same count `createFromUpload`'s quota
    * check uses, exposed for `src/modules/billing`'s usage display (P3,
@@ -320,6 +324,16 @@ export interface DocumentUseCases {
    * processing produced one, otherwise the original upload. `null` when the document does
    * not exist in this workspace - the route 404s (never leaks whether it exists elsewhere). */
   getFileForDownload(workspaceId: string, id: string): Promise<{ bytes: Uint8Array; fileName: string } | null>;
+  /** decisions/0078-mcp-server.md: the same file `getFileForDownload` serves, as a short-lived
+   * presigned object-storage URL (`ObjectStorage.presignDownload`) for a caller that cannot
+   * send the session cookie `GET /api/documents/[id]/file` needs (an AI client acting through
+   * the MCP server). `null` when the document does not exist in this workspace. The caller must
+   * have checked `documents.read` for this workspace first. */
+  getDownloadUrl(
+    workspaceId: string,
+    id: string,
+    expiresInSeconds: number,
+  ): Promise<{ url: string; fileName: string; contentType: string; expiresInSeconds: number } | null>;
   /** `[]` when the document does not exist in this workspace (never an error - mirrors
    * `getById`'s own "just show nothing" contract for a missing id). See `LinkedContactView`'s
    * own doc comment for why this lives here rather than on `ContactUseCases`. */
@@ -1314,6 +1328,10 @@ export function createDocumentUseCases(deps: DocumentUseCaseDeps): DocumentUseCa
       };
     },
 
+    async listSummaries(workspaceId, filter) {
+      return deps.repos.document.listSummaries(workspaceId, filter);
+    },
+
     async getById(workspaceId, id) {
       const row = await deps.repos.document.findById(workspaceId, id);
       return row ? toDocument(row) : null;
@@ -1341,6 +1359,15 @@ export function createDocumentUseCases(deps: DocumentUseCaseDeps): DocumentUseCa
       const key = row.searchablePdfKey ?? row.storageKey;
       const bytes = await deps.objectStorage.getObject(key);
       return { bytes, fileName: row.originalFileName };
+    },
+
+    async getDownloadUrl(workspaceId, id, expiresInSeconds) {
+      const row = await deps.repos.document.findById(workspaceId, id);
+      if (!row) return null;
+      const key = row.searchablePdfKey ?? row.storageKey;
+      const contentType = row.searchablePdfKey ? "application/pdf" : row.mimeType;
+      const url = await deps.objectStorage.presignDownload({ key, fileName: row.originalFileName, contentType, expiresInSeconds });
+      return { url, fileName: row.originalFileName, contentType, expiresInSeconds };
     },
 
     async getLinkedContacts(workspaceId, documentId) {

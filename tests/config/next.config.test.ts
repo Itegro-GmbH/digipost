@@ -14,10 +14,11 @@ import nextConfig from "../../next.config";
 describe("next.config.ts security headers", () => {
   it("sends the expected security headers on every route", async () => {
     const rules = await nextConfig.headers!();
-    expect(rules).toHaveLength(1);
+    // Exactly one rule for every route; the others are decisions/0078's CORS rules below.
+    const everyRoute = rules.filter((rule) => rule.source === "/(.*)");
+    expect(everyRoute).toHaveLength(1);
 
-    const [{ source, headers }] = rules;
-    expect(source).toBe("/(.*)");
+    const [{ headers }] = everyRoute;
 
     const byKey = Object.fromEntries(headers.map(({ key, value }) => [key, value]));
 
@@ -42,5 +43,32 @@ describe("next.config.ts security headers", () => {
     // `preload` (both are hard to undo and this template does not know a project's
     // subdomain layout). README.md documents the opt-in.
     expect(byKey["Strict-Transport-Security"]).toBe("max-age=63072000");
+  });
+
+  // decisions/0078-mcp-server.md: browser-based MCP clients need CORS on exactly the cookie-free
+  // endpoints. Pinned so a widened list (e.g. the cookie-authenticated authorize/consent
+  // endpoints, or the whole /api/auth) or a credentials header is a reviewed diff.
+  it("allows any origin, without credentials, on exactly the MCP and OAuth machine endpoints", async () => {
+    const rules = await nextConfig.headers!();
+    const cors = rules.filter((rule) => rule.headers.some(({ key }) => key === "Access-Control-Allow-Origin"));
+
+    expect(cors.map((rule) => rule.source).sort()).toEqual(
+      [
+        "/.well-known/:path*",
+        "/api/auth/.well-known/:path*",
+        "/api/auth/jwks",
+        "/api/auth/oauth2/register",
+        "/api/auth/oauth2/revoke",
+        "/api/auth/oauth2/token",
+        "/api/auth/oauth2/userinfo",
+        "/api/mcp",
+      ].sort(),
+    );
+    for (const rule of cors) {
+      const byKey = Object.fromEntries(rule.headers.map(({ key, value }) => [key, value]));
+      expect(byKey["Access-Control-Allow-Origin"]).toBe("*");
+      expect(byKey["Access-Control-Allow-Credentials"]).toBeUndefined();
+      expect(byKey["Access-Control-Expose-Headers"]).toContain("www-authenticate");
+    }
   });
 });

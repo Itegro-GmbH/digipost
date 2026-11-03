@@ -42,7 +42,10 @@ Maintenance triggers:
   its own contents (decisions/0061-a-statement-is-dated-by-its-last-booking.md)
 - The shared effective-date expression (`documentEffectiveDate`) changes - it also scopes
   `src/modules/closing`'s periods (decisions/0066-abschluss-check-and-export.md)
-Last verified: 2026-10-22, decisions/0076-match-after-every-trigger.md: a document finishing
+Last verified: 2026-11-03, decisions/0078-mcp-server.md: added `listDocumentSummariesProjection`/
+`getDocumentDownloadUrlProjection` (with `DocumentRepository.listSummaries`, which shares
+`list`'s WHERE/ORDER BY through one `listPlan`, and `DocumentUseCases.getDownloadUrl`) for the MCP
+server. Previously 2026-10-22, decisions/0076-match-after-every-trigger.md: a document finishing
 invoice-shaped queues `match-payments` due now (`JobsRepository.scheduleNow`, one queued run per
 workspace) instead of 90 seconds later, so the runner that processed it also matches it; every
 `after()` runner call in `actions.ts` passes `AFTER_RESPONSE_JOB_BUDGET_MS`, and
@@ -363,7 +366,12 @@ quota semantics; decisions/0016-processing-pipeline-and-ai.md for the processing
   this module never imports `@/persistence/schema/**` directly, only its owner rank may),
   and (F1b) `getDocumentIntakeConfirmationProjection` (an alias of
   `getDocumentDetailProjection`, named for the confirmation UI's own data dependency),
-  `listIntakeFingerprintsProjection` (`/dashboard/settings/intake`'s read model).
+  `listIntakeFingerprintsProjection` (`/dashboard/settings/intake`'s read model), and
+  (decisions/0078-mcp-server.md, the MCP server's reads) `listDocumentSummariesProjection` (the
+  inbox's filters and order through `DocumentRepository.listSummaries`: one query, list columns
+  only, a caller-chosen page size) and `getDocumentDownloadUrlProjection` (a five-minute presigned
+  object-storage URL of the same file `GET /api/documents/[id]/file` serves, via
+  `DocumentUseCases.getDownloadUrl`).
 
 ## Structure
 

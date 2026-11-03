@@ -7,3 +7,4 @@
 import "server-only";
 
 export { captureError } from "./server/capture-error";
+export { logAuditEvent, type AuditFieldValue } from "./server/audit-log";
