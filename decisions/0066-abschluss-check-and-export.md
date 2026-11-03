@@ -9,8 +9,11 @@ export contains
 Maintenance triggers:
 - A new kind of gap belongs in the check (add it to the list below)
 - The export's format changes, or a real DATEV Buchungsstapel lands
+- The open-item rule or the "Erledigung" values change
 - The effective-date expression changes (it is shared with the inbox on purpose)
-Last verified: 2026-10-02, re-verified against a sample 2025 after the folder split and cross references
+Last verified: 2026-11-02, "Offene Posten instead of Zuordnungen" below, checked against the
+owner's real August 2026. Previously 2026-10-02, re-verified against a sample 2025 after the
+folder split and cross references
 
 ## Status
 
@@ -75,8 +78,9 @@ totals are shown alongside, so "no gaps" cannot be confused with "no data".
 **The export is deliberately not DATEV.** A ZIP with `uebersicht.xlsx` and the documents'
 own files. German headers, real dates and real numbers so the advisor can sum them.
 
-Three sheets, because the owner found two were not enough: **Dokumente**, **Buchungen**, and
-**Zuordnungen**, one row per confirmed pairing. Each of the first two carries its own `Nr.`
+Three sheets: **Belege**, **Buchungen**, and **Offene Posten** (see "Offene Posten instead of
+Zuordnungen" below; the third sheet was first **Zuordnungen**, one row per confirmed pairing,
+because the owner found two sheets were not enough). Each of the first two carries its own `Nr.`
 column (`D-001`, `B-001`) and names its counterparts by those numbers rather than counting
 them, so the connection between an invoice and the booking that settled it is readable inside
 the workbook. A counterpart that has no row here is named rather than dropped: `außerhalb des
@@ -92,6 +96,36 @@ searchable PDF where one exists, otherwise the original upload, with the extensi
 type actually calls for: a bank statement stays XML or MT940.
 
 **Admin only** (`finance.read`), the same gate as the rest of the finance area.
+
+## Offene Posten instead of Zuordnungen (2026-11-02)
+
+Closing August 2026 for real showed that the workbook still did not answer what the owner and
+the tax advisor actually asked: 38 documents, 8 bookings and 11 pairings, and no way to see
+why those numbers differ or whether everything is covered. The gaps were all about TIME, not
+about pairing: an invoice paid three weeks after the month ended, an app store paying out two
+months later, Google Play paying three months out together, a platform's 27 small ad invoices
+settled through its clearing account with no bank booking of their own. The pairing sheet
+showed each link but none of that.
+
+So the period's last day, the **Stichtag**, becomes the reference point, on the Soll basis the
+owner confirmed (a document belongs to the month of its own date, the money may move later):
+
+- **Belege** replaces "Zahlungsstatus" with **Erledigung**: the effective status, except
+  "Zahlung nach Stichtag" / "Teils nach Stichtag bezahlt" when a payment was booked after the
+  Stichtag (the effective "Bezahlt" would hide exactly that), and "Über Verrechnungskonto
+  erledigt" for `settled`. "Zugeordnete Buchungen" becomes **Zahlung(en)**: each payment with
+  the amount this document claims of it, by "Nr." or by date and timing.
+- **Offene Posten** (new) lists what was still owed on the Stichtag, payables then
+  receivables: the part paid after it plus the part still open today, with how it was settled
+  since. The side comes from an actual payment's sign where there is one (a payout report has
+  no direction), else from direction and the sign of the total. Documents finished without a
+  payment are never open items. Only the period's own documents are read.
+- **Zuordnungen** is dropped: its amounts now sit in "Zahlung(en)", and the owner chose three
+  sheets over four.
+
+Everything above is computed in one pure place (`core/open-items.ts`) from the confirmed links
+the export already read, so no query, table or count of the check changed. The terms are
+generic on purpose; no platform is special-cased.
 
 ## Consequences
 
@@ -111,7 +145,7 @@ type actually calls for: a bank statement stays XML or MT940.
   invoice, which is a product question, not a bug to fix silently.
 - Nothing here books anything. There is still no chart of accounts and no double entry, and
   adding them would be a second product, not a feature.
-- The Zuordnungen sheet made an existing inconsistency visible rather than causing it: for a
+- The Zuordnungen sheet (now "Zahlung(en)") made an existing inconsistency visible rather than causing it: for a
   foreign-currency invoice, `document_transactions.allocated_amount_cents` holds the DOCUMENT's
   amount (12,00 USD) while the booking it settles is in EUR (-11,50), although that column's
   own schema comment calls it a portion of the transaction's amount. The export shows what is

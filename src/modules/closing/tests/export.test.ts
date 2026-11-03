@@ -73,7 +73,33 @@ const documents: ClosingDocumentRow[] = [
     totalAmountCents: 50000,
     currency: "EUR",
     paymentStatus: "paid",
-    confirmedTransactions: [],
+    // The customer paid on 3 February: still owed to the workspace on the January Stichtag.
+    confirmedTransactions: [
+      { id: "aa000000-0000-0000-0000-000000000012", bookingDate: "2026-02-03", amountCents: 50000, currency: "EUR", allocatedAmountCents: 50000 },
+    ],
+  },
+  // An incoming invoice paid after the Stichtag: still owed BY the workspace on 31 January.
+  {
+    id: "dddd0004-0000-0000-0000-000000000013",
+    effectiveDate: "2026-01-28",
+    originalFileName: "stadtwerke.pdf",
+    mimeType: "application/pdf",
+    searchablePdfKey: null,
+    kind: "incoming_invoice",
+    platform: null,
+    direction: "incoming",
+    documentDate: "2026-01-28",
+    sender: null,
+    counterpartyName: "Stadtwerke",
+    reportPeriod: null,
+    statementLastBooking: null,
+    invoiceNumber: "SW-1",
+    totalAmountCents: 8000,
+    currency: "EUR",
+    paymentStatus: "paid",
+    confirmedTransactions: [
+      { id: "bb000000-0000-0000-0000-000000000014", bookingDate: "2026-02-10", amountCents: -8000, currency: "EUR", allocatedAmountCents: 8000 },
+    ],
   },
 ];
 
@@ -122,6 +148,7 @@ const fileBytes = new Map<string, Uint8Array>([
   [documents[0]!.id, new TextEncoder().encode("%PDF-1.7 rechnung")],
   [documents[1]!.id, new TextEncoder().encode("<Document/>")],
   [documents[2]!.id, new TextEncoder().encode("%PDF-1.7 ausgangsrechnung")],
+  [documents[3]!.id, new TextEncoder().encode("%PDF-1.7 stadtwerke")],
 ]);
 
 vi.mock("../server/read-models", () => ({
@@ -130,9 +157,9 @@ vi.mock("../server/read-models", () => ({
 }));
 
 const labels: ClosingExportLabels = {
-  documentsSheetName: "Dokumente",
+  documentsSheetName: "Belege",
   transactionsSheetName: "Buchungen",
-  assignmentsSheetName: "Zuordnungen",
+  openItemsSheetName: "Offene Posten",
   documentColumns: {
     reference: "Nr.",
     date: "Datum",
@@ -143,8 +170,8 @@ const labels: ClosingExportLabels = {
     amount: "Betrag",
     currency: "Währung",
     invoiceNumber: "Rechnungsnummer",
-    paymentStatus: "Zahlungsstatus",
-    matchedTransactions: "Zugeordnete Buchungen",
+    settlement: "Erledigung",
+    payments: "Zahlung(en)",
     file: "Datei",
   },
   transactionColumns: {
@@ -158,21 +185,33 @@ const labels: ClosingExportLabels = {
     matchedDocuments: "Zugeordnete Belege",
     status: "Status",
   },
-  assignmentColumns: {
+  openItemColumns: {
+    type: "Art",
     documentReference: "Beleg-Nr.",
     documentDate: "Belegdatum",
     document: "Beleg",
+    counterparty: "Gegenpartei",
     documentAmount: "Belegbetrag",
+    openAmount: "Offen zum Stichtag",
     currency: "Währung",
-    transactionReference: "Buchungs-Nr.",
-    transactionDate: "Buchungsdatum",
-    transactionAmount: "Buchungsbetrag",
-    allocatedAmount: "Zugeordneter Betrag",
+    settledBy: "Ausgeglichen",
   },
   // The real route formats these with `Intl`; the test only needs them distinguishable.
   reference: {
     outsidePeriod: ({ isoDate, amountCents }) => `außerhalb des Zeitraums (${isoDate}, ${amountCents ?? "-"})`,
     notListed: ({ isoDate, amountCents }) => `nicht in dieser Übersicht (${isoDate}, ${amountCents ?? "-"})`,
+  },
+  payment: {
+    listed: (reference, { amountCents }) => `${reference}: ${amountCents}`,
+    beforePeriod: ({ isoDate, amountCents }) => `vor dem Zeitraum (${isoDate}, ${amountCents})`,
+    afterPeriod: ({ isoDate, amountCents }) => `nach Stichtag (${isoDate}, ${amountCents})`,
+    notListed: ({ isoDate, amountCents }) => `nicht in dieser Übersicht (${isoDate}, ${amountCents})`,
+  },
+  settlement: { afterPeriod: "Zahlung nach Stichtag", partlyAfterPeriod: "Teils nach Stichtag bezahlt", settledViaClearing: "Über Verrechnungskonto erledigt" },
+  openItemType: { payable: "Verbindlichkeit", receivable: "Forderung" },
+  openItem: {
+    paidOn: ({ isoDate, amountCents }) => `${isoDate}: ${amountCents}`,
+    stillOpen: ({ amountCents }) => `noch offen: ${amountCents}`,
   },
   transactionStatus: { matched: "zugeordnet", noDocumentNeeded: "kein Beleg nötig", open: "offen" },
   documentKind: (kind) => kind,
@@ -234,7 +273,7 @@ describe("createClosingExport", () => {
     const entries = readZipEntries(zip);
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(entries.get("uebersicht.xlsx")! as unknown as ArrayBuffer);
-    const sheet = workbook.getWorksheet("Dokumente")!;
+    const sheet = workbook.getWorksheet("Belege")!;
 
     const headers = sheet.getRow(1).values as (string | undefined)[];
     const fileColumn = headers.indexOf("Datei");
@@ -251,19 +290,23 @@ describe("createClosingExport", () => {
     expect(sheet.getRow(3).getCell(headers.indexOf("Name")).value).toBe("Kontoauszug, 20.01.2026");
   });
 
-  it("gives every row a Nr. and replaces the two counts with the references they stand for", async () => {
+  it("gives every row a Nr. and names every payment with its amount", async () => {
     const sheets = await exportedWorkbook();
-    const documentsSheet = readSheet(sheets, "Dokumente");
+    const documentsSheet = readSheet(sheets, "Belege");
     const transactionsSheet = readSheet(sheets, "Buchungen");
 
-    expect(documentsSheet.rows.map((row) => row["Nr."])).toEqual(["D-001", "D-002", "D-003"]);
+    expect(documentsSheet.rows.map((row) => row["Nr."])).toEqual(["D-001", "D-002", "D-003", "D-004"]);
     expect(transactionsSheet.rows.map((row) => row["Nr."])).toEqual(["B-001", "B-002", "B-003"]);
 
     // The invoice is settled by a booking of this period AND by one from December, which has
-    // no row here: it is named rather than dropped.
-    expect(documentsSheet.rows[0]!["Zugeordnete Buchungen"]).toBe("B-001, außerhalb des Zeitraums (2025-12-14, -2300)");
+    // no row here: it is named by its date rather than dropped, each with its own amount.
+    expect(documentsSheet.rows[0]!["Zahlung(en)"]).toBe("B-001: 119000, vor dem Zeitraum (2025-12-14, 2300)");
+    expect(documentsSheet.rows[0]!.Erledigung).toBe("open");
     // Nothing assigned is an empty cell, never a 0 that reads like an amount.
-    expect(documentsSheet.rows[1]!["Zugeordnete Buchungen"]).toBe("");
+    expect(documentsSheet.rows[1]!["Zahlung(en)"]).toBe("");
+    // Paid after the Stichtag: the effective status alone ("paid") would hide exactly that.
+    expect(documentsSheet.rows[2]!["Zahlung(en)"]).toBe("nach Stichtag (2026-02-03, 50000)");
+    expect(documentsSheet.rows[2]!.Erledigung).toBe("Zahlung nach Stichtag");
 
     expect(transactionsSheet.rows[0]!["Zugeordnete Belege"]).toBe("D-001");
     expect(transactionsSheet.rows[0]!.Status).toBe("zugeordnet");
@@ -272,58 +315,54 @@ describe("createClosingExport", () => {
     // Every "Nr." a cell points at resolves to a row of the sheet it names.
     const documentNumbers = new Set(documentsSheet.rows.map((row) => row["Nr."]));
     const transactionNumbers = new Set(transactionsSheet.rows.map((row) => row["Nr."]));
-    for (const cell of documentsSheet.rows.map((row) => row["Zugeordnete Buchungen"])) {
-      for (const reference of cell.split(", ").filter((part) => /^B-\d+$/.test(part))) expect(transactionNumbers.has(reference)).toBe(true);
+    for (const cell of documentsSheet.rows.map((row) => row["Zahlung(en)"])) {
+      for (const reference of cell.split(", ").map((part) => part.split(":")[0]!).filter((part) => /^B-\d+$/.test(part))) {
+        expect(transactionNumbers.has(reference)).toBe(true);
+      }
     }
     for (const cell of transactionsSheet.rows.map((row) => row["Zugeordnete Belege"])) {
       for (const reference of cell.split(", ").filter((part) => /^D-\d+$/.test(part))) expect(documentNumbers.has(reference)).toBe(true);
     }
   });
 
-  it("writes a Zuordnungen sheet with one row per confirmed pairing, both sides named", async () => {
+  it("writes an Offene Posten sheet with what was still owed on the Stichtag, payables first", async () => {
     const sheets = await exportedWorkbook();
-    const assignments = readSheet(sheets, "Zuordnungen");
+    const openItems = readSheet(sheets, "Offene Posten");
 
-    expect(assignments.headers).toEqual([
+    expect(sheets.worksheets.map((sheet) => sheet.name)).toEqual(["Belege", "Buchungen", "Offene Posten"]);
+    expect(openItems.headers).toEqual([
+      "Art",
       "Beleg-Nr.",
       "Belegdatum",
       "Beleg",
+      "Gegenpartei",
       "Belegbetrag",
+      "Offen zum Stichtag",
       "Währung",
-      "Buchungs-Nr.",
-      "Buchungsdatum",
-      "Buchungsbetrag",
-      "Zugeordneter Betrag",
+      "Ausgeglichen",
     ]);
 
-    expect(assignments.rows).toHaveLength(3);
-    expect(assignments.rows[0]).toMatchObject({
-      "Beleg-Nr.": "D-001",
-      Beleg: "Bauwerk Generalbau, 15.01.2026",
-      Belegbetrag: 1190,
-      "Buchungs-Nr.": "B-001",
-      Buchungsbetrag: -1190,
-      "Zugeordneter Betrag": 1190,
+    // The open invoice D-001 is fully allocated and the bank statement D-002 owes nothing:
+    // only the two documents paid after the Stichtag are left.
+    expect(openItems.rows).toHaveLength(2);
+    expect(openItems.rows[0]).toMatchObject({
+      Art: "Verbindlichkeit",
+      "Beleg-Nr.": "D-004",
+      Gegenpartei: "Stadtwerke",
+      Belegbetrag: 80,
+      "Offen zum Stichtag": 80,
       Währung: "EUR",
+      Ausgeglichen: "2026-02-10: 8000",
     });
-    // The December booking: inside the period on the document's side only.
-    expect(assignments.rows[1]).toMatchObject({
-      "Beleg-Nr.": "D-001",
-      "Buchungs-Nr.": "außerhalb des Zeitraums (2025-12-14, -2300)",
-      Buchungsbetrag: -23,
-      "Zugeordneter Betrag": 23,
+    expect(openItems.rows[1]).toMatchObject({
+      Art: "Forderung",
+      "Beleg-Nr.": "D-003",
+      Beleg: "Kunde, 25.01.2026",
+      "Offen zum Stichtag": 500,
+      Ausgeglichen: "2026-02-03: 50000",
     });
-    // And the mirror case: a January booking settled by a December invoice, which this
-    // workbook does not list and therefore cannot name.
-    expect(assignments.rows[2]).toMatchObject({
-      "Beleg-Nr.": "außerhalb des Zeitraums (2025-12-14, 2300)",
-      Beleg: "",
-      "Buchungs-Nr.": "B-003",
-      "Zugeordneter Betrag": 23,
-    });
-    // Real dates, not strings, on both sides.
-    expect(assignments.raw.getRow(2).getCell(2).value).toBeInstanceOf(Date);
-    expect(assignments.raw.getRow(2).getCell(7).value).toBeInstanceOf(Date);
+    // A real date, not a string.
+    expect(openItems.raw.getRow(2).getCell(3).value).toBeInstanceOf(Date);
   });
 });
 

@@ -11,11 +11,22 @@ import "server-only";
  */
 import type { ClosingDocumentRow, ClosingTransactionRow, DocumentDirection } from "@/persistence/repositories/contracts";
 
-import { buildClosingCrossReferences, type ClosingAssignment, type ClosingReferenceLabels } from "../core/cross-references";
+import { buildClosingCrossReferences, type ClosingReferenceLabels } from "../core/cross-references";
 import { assignBelegFileNames, fileExtensionFor, OVERVIEW_FILE_NAME } from "../core/file-names";
 import { closingDocumentName, closingDocumentNameSource, type ClosingNameLabels } from "../core/document-name";
+import {
+  buildClosingOpenItems,
+  CLOSING_SETTLEMENT_TIMINGS,
+  OPEN_ITEM_TYPES,
+  paymentsCell,
+  settlementTiming,
+  type ClosingDatedPayment,
+  type ClosingOpenItem,
+  type ClosingPaymentAmount,
+  type ClosingPaymentLabels,
+} from "../core/open-items";
 import type { ClosingPeriod } from "../core/period";
-import type { ClosingAssignmentSheetRow, ClosingDocumentSheetRow, ClosingTransactionSheetRow } from "../core/types";
+import type { ClosingDocumentSheetRow, ClosingOpenItemSheetRow, ClosingTransactionSheetRow } from "../core/types";
 
 import { createClosingArchiveStream, type ClosingArchiveEntry } from "./export-archive";
 import { buildClosingOverviewWorkbook, type ClosingSheetColumn } from "./export-workbook";
@@ -24,13 +35,23 @@ import { createClosingDocumentFileReader, getClosingExportData } from "./read-mo
 export type ClosingExportLabels = {
   documentsSheetName: string;
   transactionsSheetName: string;
-  assignmentsSheetName: string;
+  openItemsSheetName: string;
   documentColumns: Record<keyof ClosingDocumentSheetRow, string>;
   transactionColumns: Record<keyof ClosingTransactionSheetRow, string>;
-  assignmentColumns: Record<keyof ClosingAssignmentSheetRow, string>;
-  /** How a confirmed counterpart with no "Nr." in this workbook is named
-   * (`core/cross-references.ts`). */
+  openItemColumns: Record<keyof ClosingOpenItemSheetRow, string>;
+  /** How a confirmed document with no "Nr." in this workbook is named on the "Buchungen"
+   * sheet (`core/cross-references.ts`). */
   reference: ClosingReferenceLabels;
+  /** How each payment is named in the "Belege" sheet's "Zahlung(en)" cell
+   * (`core/open-items.ts`). */
+  payment: ClosingPaymentLabels;
+  /** The "Erledigung" values this export adds to `paymentStatus` below. */
+  settlement: { afterPeriod: string; partlyAfterPeriod: string; settledViaClearing: string };
+  /** "Verbindlichkeit" / "Forderung". */
+  openItemType: { payable: string; receivable: string };
+  /** The "Offene Posten" sheet's "Ausgeglichen" cell: one part per payment after the
+   * Stichtag, plus the part still open today. */
+  openItem: { paidOn: (payment: ClosingDatedPayment) => string; stillOpen: (amount: ClosingPaymentAmount) => string };
   /** `DocumentKinds.<kind>`. */
   documentKind: (kind: string) => string;
   /** `Inbox.directionValues.<direction>`; `null` has no label and stays an empty cell. */
@@ -54,8 +75,8 @@ const DOCUMENT_COLUMN_WIDTHS: Record<keyof ClosingDocumentSheetRow, number> = {
   amount: 14,
   currency: 10,
   invoiceNumber: 20,
-  paymentStatus: 18,
-  matchedTransactions: 28,
+  settlement: 26,
+  payments: 40,
   file: 50,
 };
 
@@ -71,16 +92,16 @@ const TRANSACTION_COLUMN_WIDTHS: Record<keyof ClosingTransactionSheetRow, number
   status: 20,
 };
 
-const ASSIGNMENT_COLUMN_WIDTHS: Record<keyof ClosingAssignmentSheetRow, number> = {
-  documentReference: 28,
+const OPEN_ITEM_COLUMN_WIDTHS: Record<keyof ClosingOpenItemSheetRow, number> = {
+  type: 16,
+  documentReference: 8,
   documentDate: 12,
   document: 40,
+  counterparty: 30,
   documentAmount: 14,
+  openAmount: 16,
   currency: 10,
-  transactionReference: 28,
-  transactionDate: 12,
-  transactionAmount: 14,
-  allocatedAmount: 16,
+  settledBy: 40,
 };
 
 /** An ISO `YYYY-MM-DD` as a real date. Noon UTC, not midnight: a cell read back in a
@@ -91,7 +112,7 @@ function isoToDate(iso: string): Date {
 
 function documentColumnType(key: keyof ClosingDocumentSheetRow): ClosingSheetColumn<ClosingDocumentSheetRow>["type"] {
   if (key === "date") return "date";
-  if (key === "amount" || key === "matchedTransactions") return "number";
+  if (key === "amount") return "number";
   return "text";
 }
 
@@ -101,9 +122,9 @@ function transactionColumnType(key: keyof ClosingTransactionSheetRow): ClosingSh
   return "text";
 }
 
-function assignmentColumnType(key: keyof ClosingAssignmentSheetRow): ClosingSheetColumn<ClosingAssignmentSheetRow>["type"] {
-  if (key === "documentDate" || key === "transactionDate") return "date";
-  if (key === "documentAmount" || key === "transactionAmount" || key === "allocatedAmount") return "number";
+function openItemColumnType(key: keyof ClosingOpenItemSheetRow): ClosingSheetColumn<ClosingOpenItemSheetRow>["type"] {
+  if (key === "documentDate") return "date";
+  if (key === "documentAmount" || key === "openAmount") return "number";
   return "text";
 }
 
@@ -125,20 +146,32 @@ function transactionColumns(labels: ClosingExportLabels): ClosingSheetColumn<Clo
   }));
 }
 
-function assignmentColumns(labels: ClosingExportLabels): ClosingSheetColumn<ClosingAssignmentSheetRow>[] {
-  return (Object.keys(ASSIGNMENT_COLUMN_WIDTHS) as (keyof ClosingAssignmentSheetRow)[]).map((key) => ({
-    header: labels.assignmentColumns[key],
-    width: ASSIGNMENT_COLUMN_WIDTHS[key],
-    type: assignmentColumnType(key),
+function openItemColumns(labels: ClosingExportLabels): ClosingSheetColumn<ClosingOpenItemSheetRow>[] {
+  return (Object.keys(OPEN_ITEM_COLUMN_WIDTHS) as (keyof ClosingOpenItemSheetRow)[]).map((key) => ({
+    header: labels.openItemColumns[key],
+    width: OPEN_ITEM_COLUMN_WIDTHS[key],
+    type: openItemColumnType(key),
     value: (row) => row[key],
   }));
+}
+
+/** The "Erledigung": a payment after the Stichtag says so first, because that is exactly
+ * what the effective status ("Bezahlt") hides; a clearing-account settlement says how it was
+ * settled; everything else is the payment status as the rest of the product shows it. */
+function settlementLabel(document: ClosingDocumentRow, period: ClosingPeriod, labels: ClosingExportLabels): string {
+  const timing = settlementTiming(document, period);
+  if (timing === CLOSING_SETTLEMENT_TIMINGS.afterPeriod) return labels.settlement.afterPeriod;
+  if (timing === CLOSING_SETTLEMENT_TIMINGS.partlyAfterPeriod) return labels.settlement.partlyAfterPeriod;
+  if (document.paymentStatus === "settled") return labels.settlement.settledViaClearing;
+  return labels.paymentStatus(document.paymentStatus);
 }
 
 function toDocumentSheetRow(
   document: ClosingDocumentRow,
   reference: string,
   name: string,
-  matchedTransactions: string,
+  settlement: string,
+  payments: string,
   file: string,
   labels: ClosingExportLabels,
 ): ClosingDocumentSheetRow {
@@ -154,8 +187,8 @@ function toDocumentSheetRow(
     amount: document.totalAmountCents === null ? null : document.totalAmountCents / 100,
     currency: document.totalAmountCents === null ? "" : (document.currency ?? "EUR"),
     invoiceNumber: document.invoiceNumber ?? "",
-    paymentStatus: labels.paymentStatus(document.paymentStatus),
-    matchedTransactions,
+    settlement,
+    payments,
     file,
   };
 }
@@ -187,20 +220,25 @@ function toTransactionSheetRow(
   };
 }
 
-/** The "Zuordnungen" sheet. `documentName` resolves to `""` for a pairing whose document this
- * workbook does not list - there is no row here to read a name from, and the reference beside
- * it already says which document is meant. */
-function toAssignmentSheetRow(assignment: ClosingAssignment, documentName: (documentId: string | null) => string): ClosingAssignmentSheetRow {
+function toOpenItemSheetRow(
+  item: ClosingOpenItem,
+  document: ClosingDocumentRow,
+  reference: string,
+  name: string,
+  labels: ClosingExportLabels,
+): ClosingOpenItemSheetRow {
+  const settledBy = item.paidAfterPeriod.map((payment) => labels.openItem.paidOn(payment));
+  if (item.stillOpenCents > 0) settledBy.push(labels.openItem.stillOpen({ amountCents: item.stillOpenCents, currency: item.currency }));
   return {
-    documentReference: assignment.documentReference,
-    documentDate: isoToDate(assignment.documentDate),
-    document: documentName(assignment.documentRowId),
-    documentAmount: assignment.documentAmountCents === null ? null : assignment.documentAmountCents / 100,
-    currency: assignment.currency,
-    transactionReference: assignment.transactionReference,
-    transactionDate: isoToDate(assignment.transactionDate),
-    transactionAmount: assignment.transactionAmountCents / 100,
-    allocatedAmount: assignment.allocatedAmountCents / 100,
+    type: item.type === OPEN_ITEM_TYPES.payable ? labels.openItemType.payable : labels.openItemType.receivable,
+    documentReference: reference,
+    documentDate: isoToDate(document.effectiveDate),
+    document: name,
+    counterparty: document.counterpartyName ?? document.sender ?? "",
+    documentAmount: document.totalAmountCents === null ? null : document.totalAmountCents / 100,
+    openAmount: item.openAtPeriodEndCents / 100,
+    currency: item.currency,
+    settledBy: settledBy.join(", "),
   };
 }
 
@@ -234,9 +272,9 @@ export async function createClosingExport(workspaceId: string, period: ClosingPe
     })),
   );
 
-  // Likewise one decision, three consumers: both sheets' cross-reference columns and the
-  // "Zuordnungen" sheet are all read out of this one result, so a "Nr." can never mean two
-  // different rows (decisions/0066).
+  // Likewise one decision, three consumers: the "Zahlung(en)" cells, the "Buchungen" sheet's
+  // cross references and the "Offene Posten" sheet all read their numbers out of this one
+  // result, so a "Nr." can never mean two different rows (decisions/0066).
   const crossReferences = buildClosingCrossReferences({
     period: { from: period.from, to: period.to },
     documents,
@@ -244,6 +282,8 @@ export async function createClosingExport(workspaceId: string, period: ClosingPe
     labels: labels.reference,
   });
   const documentNames = new Map(documents.map((document) => [document.id, closingDocumentName(document, labels.name)]));
+  const documentsById = new Map(documents.map((document) => [document.id, document]));
+  const openItems = buildClosingOpenItems(documents, period);
 
   const overview = await buildClosingOverviewWorkbook(
     {
@@ -254,7 +294,8 @@ export async function createClosingExport(workspaceId: string, period: ClosingPe
           document,
           crossReferences.documentReferences.get(document.id) ?? "",
           documentNames.get(document.id) ?? "",
-          crossReferences.transactionsOfDocument.get(document.id) ?? "",
+          settlementLabel(document, period, labels),
+          paymentsCell(document, period, crossReferences.transactionReferences, labels.payment),
           filesById.get(document.id) ?? "",
           labels,
         ),
@@ -273,10 +314,16 @@ export async function createClosingExport(workspaceId: string, period: ClosingPe
       ),
     },
     {
-      name: labels.assignmentsSheetName,
-      columns: assignmentColumns(labels),
-      rows: crossReferences.assignments.map((assignment) =>
-        toAssignmentSheetRow(assignment, (documentId) => (documentId === null ? "" : (documentNames.get(documentId) ?? ""))),
+      name: labels.openItemsSheetName,
+      columns: openItemColumns(labels),
+      rows: openItems.map((item) =>
+        toOpenItemSheetRow(
+          item,
+          documentsById.get(item.documentId)!,
+          crossReferences.documentReferences.get(item.documentId) ?? "",
+          documentNames.get(item.documentId) ?? "",
+          labels,
+        ),
       ),
     },
   );
