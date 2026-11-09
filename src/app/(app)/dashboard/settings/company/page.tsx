@@ -5,6 +5,7 @@ import { PERMISSIONS } from "@/platform/access";
 import { requireWorkspaceMember } from "@/platform/access/server";
 import { getCompanyProfileProjection } from "@/modules/workspaces/server";
 import { CompanyProfileForm, WorkspaceDangerZone } from "@/modules/workspaces/client";
+import { countIssuedInvoicesProjection } from "@/modules/invoicing/server";
 
 /** "Firmendaten" (C2, decisions/0021-extraction-direction-and-invoice-fields.md): admin-only,
  * 404s for a non-admin visiting the URL directly - same pattern as `/dashboard/settings/intake`
@@ -43,7 +44,7 @@ export default async function CompanySettingsPage() {
       </div>
       <CompanyProfileForm profile={profile} />
       {access.permissions.includes(PERMISSIONS.workspaceManage) ? (
-        <WorkspaceDangerZone workspaceName={access.workspace.name} />
+        <WorkspaceDangerZone workspaceName={access.workspace.name} issuedInvoiceCount={await countIssuedInvoicesProjection(access.workspace.id)} />
       ) : null}
     </div>
   );

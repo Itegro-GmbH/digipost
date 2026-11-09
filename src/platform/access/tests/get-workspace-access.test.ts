@@ -103,7 +103,7 @@ describe("resolveAccess and the active-workspace cookie", () => {
     // Admin in the oldest workspace, plain member in the active one: the permission bundle
     // must follow the ACTIVE workspace.
     await expect(resolveAccess(USER)).resolves.toMatchObject({
-      permissions: [PERMISSIONS.documentsRead, PERMISSIONS.documentsWrite],
+      permissions: [PERMISSIONS.documentsRead, PERMISSIONS.documentsWrite, PERMISSIONS.invoicesManage],
     });
   });
 
@@ -159,7 +159,7 @@ describe("getWorkspaceAccess", () => {
     });
   });
 
-  it("gives a member role only the document permissions", async () => {
+  it("gives a member role only the document permissions and writing invoices", async () => {
     vi.mocked(getCurrentUser).mockResolvedValue(USER);
     listMembershipsForUser.mockResolvedValue([{ ...OLDEST, role: "member" }]);
 
@@ -167,7 +167,7 @@ describe("getWorkspaceAccess", () => {
 
     expect(result).toMatchObject({
       status: "ok",
-      access: { permissions: [PERMISSIONS.documentsRead, PERMISSIONS.documentsWrite] },
+      access: { permissions: [PERMISSIONS.documentsRead, PERMISSIONS.documentsWrite, PERMISSIONS.invoicesManage] },
     });
   });
 });

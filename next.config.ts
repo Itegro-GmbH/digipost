@@ -102,6 +102,8 @@ const MCP_CORS_HEADERS = [
 // the one it started on, which leaves a page served through a tunnel (APP_URL pointing at e.g.
 // a Cloudflare quick tunnel) unhydrated: forms fall back to a native GET submit. Allowing
 // APP_URL's own hostname fixes that; dev-only, ignored by `next build`.
+const EINVOICE_DATA_FILES = "./node_modules/@itegro/einvoice/{assets,schematron}/**/*";
+
 const devAppHost = isDev && process.env.APP_URL ? new URL(process.env.APP_URL).hostname : null;
 
 const nextConfig: NextConfig = {
@@ -114,6 +116,18 @@ const nextConfig: NextConfig = {
   // other unset NEXT_PUBLIC_* var - `sentryInitOptions` treats that as "no DSN".
   env: {
     NEXT_PUBLIC_SENTRY_DSN: process.env.SENTRY_DSN,
+  },
+
+  // decisions/0079-outgoing-invoices.md: `@itegro/einvoice` reads its fonts, ICC profile and
+  // Schematron rule sets from paths computed at runtime, which the file tracer cannot see, so
+  // they are included explicitly for every route that renders or validates an invoice (the
+  // pages under `/dashboard/invoices` run the Server Actions that finalize and cancel). Kept
+  // external so no bundler rewrites the package's own module paths (the package's README).
+  serverExternalPackages: ["@itegro/einvoice"],
+  outputFileTracingIncludes: {
+    "/dashboard/invoices": [EINVOICE_DATA_FILES],
+    "/dashboard/invoices/**": [EINVOICE_DATA_FILES],
+    "/api/invoices/**": [EINVOICE_DATA_FILES],
   },
 
   async headers() {

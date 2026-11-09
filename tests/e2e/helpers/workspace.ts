@@ -73,3 +73,16 @@ export async function deleteWorkspaceById(id: string | undefined): Promise<void>
   if (!id) return;
   await ownerQuery(`delete from public.workspaces where id = $1`, [id]);
 }
+
+/** decisions/0079-outgoing-invoices.md: fills the company profile ("Firmendaten") an invoice needs
+ * (address and VAT id) plus one own IBAN, directly, so an invoicing spec need not drive the
+ * settings form first. */
+export async function setCompanyProfileForInvoices(workspaceId: string): Promise<void> {
+  await ownerQuery(
+    `update public.workspaces
+        set company_address_line1 = 'Hauptstraße 1', company_postal_code = '10115', company_city = 'Berlin',
+            company_country = 'DE', company_vat_id = 'DE123456789', company_ibans = array['DE89370400440532013000']
+      where id = $1`,
+    [workspaceId],
+  );
+}

@@ -18,6 +18,7 @@ import {
 } from "./contacts-repository";
 import { createDrizzleDocumentRepository } from "./documents-repository";
 import { createDrizzleIntakeFingerprintRepository } from "./intake-fingerprints-repository";
+import { createDrizzleInvoiceRepository } from "./invoices-repository";
 import { createDrizzleJobsRepository } from "./jobs-repository";
 import { createDrizzleMailIntakeRepository } from "./mail-intake-repository";
 import {
@@ -57,5 +58,6 @@ export function createDrizzleRepositories(db: DbExecutor): Repositories {
     paymentNoDocumentRule: createDrizzlePaymentNoDocumentRuleRepository(db),
     paymentArbiterAnswer: createDrizzlePaymentArbiterAnswerRepository(db),
     mailIntake: createDrizzleMailIntakeRepository(db),
+    invoice: createDrizzleInvoiceRepository(db),
   };
 }

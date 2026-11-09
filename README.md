@@ -13,7 +13,9 @@ Maintenance triggers:
 - A new top-level owner root (`src/modules/`, `src/persistence/`, ...) is populated for the first
   time
 - `.github/workflows/ci.yml` changes what runs or when
-Last verified: 2026-11-03, decisions/0078-mcp-server.md: added the "MCP server for AI clients"
+Last verified: 2026-11-05, decisions/0079-outgoing-invoices.md: added the "Rechnungen schreiben"
+feature bullet and item 12a of "Before going to production" (no new environment variable).
+2026-11-03, decisions/0078-mcp-server.md: added the "MCP server for AI clients"
 feature bullet and item 5a of "Before going to production" (no new environment variable).
 2026-10-22, decisions/0075-email-intake.md: added the "E-Mail-Eingang" feature
 bullet, its four environment variables, and item 5 of "Before going to production" (Resend as
@@ -185,6 +187,16 @@ What exists today, as vertical slices:
   it, sees a log of received mails (kept until the workspace is deleted), and gets at most one
   notice per day and reason when mails are rejected. Mail to any other address of the Resend
   account is answered and dropped without storing anything.
+- **Rechnungen schreiben** (`src/modules/invoicing`, decisions/0079-outgoing-invoices.md): every
+  member writes invoices at `/dashboard/invoices` (buyer picked from the contacts or typed in,
+  lines at 19/7/0 % VAT, delivery date or period, payment term, one of the workspace's own IBANs).
+  "Festschreiben" issues a ZUGFeRD e-invoice (EN 16931, PDF/A-3B with the XML embedded, rendered and
+  validated by `@itegro/einvoice`) with today's date and the next number of the year (`2026-0001`,
+  gapless), archives PDF and XML, and files it in the inbox as an outgoing invoice for payment
+  matching (it counts against the document quota). Issued invoices are append-only (GoBD): the
+  database refuses any change or deletion; the only correction is a full cancellation, itself a new
+  numbered correction invoice. All invoices download as one ZIP; a workspace with invoices is
+  deleted only after the admin confirmed they downloaded them.
 - **Marketing landing page** (`src/app/(marketing)/`): hero, problem, how it works,
   features, a comparison to a scan-service bureau, pricing (read from
   `src/modules/billing`'s tier constants, never duplicated), trust/privacy facts, FAQ, and
@@ -700,6 +712,12 @@ noted, before that changes.
     the longest window the plan offers, add a scheduled logical dump to storage under a different account, and
     test a restore; decide the same for the R2 bucket (`scripts/deploy/README.md`, section 6). A business keeps
     its incoming mail here, so this blocks real customers.
+12a. **Invoices: a tax advisor's look, and an immutable bucket.** `src/modules/invoicing` follows
+    section 14 UStG and the GoBD as far as code can (decisions/0079-outgoing-invoices.md), but the
+    library's own disclaimer applies: have a tax advisor review sample invoices (a normal one, 0 %
+    with each exemption, a cancellation) and the procedure documentation ("Verfahrensdokumentation")
+    before customers rely on it. The database refuses changes to issued invoices; the R2 bucket does
+    not yet (consider an object lock / retention rule on `workspaces/*/invoices/`).
 13. **Verify everything, once, before calling any of the above done.**
     `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:docker &&
     pnpm test:e2e:docker` - "CI" above lists what each command corresponds to. CI runs the same suites on every

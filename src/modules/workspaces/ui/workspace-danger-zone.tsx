@@ -18,19 +18,24 @@ import type { WorkspaceActionErrorCode } from "../core/error-codes";
  * (`deleteWorkspaceAction` never trusts this client-side comparison alone). On success the
  * action itself redirects to `/onboarding`, so there is no local "done" state to render here.
  */
-export function WorkspaceDangerZone({ workspaceName }: { workspaceName: string }) {
+export function WorkspaceDangerZone({ workspaceName, issuedInvoiceCount }: { workspaceName: string; issuedInvoiceCount: number }) {
   const t = useTranslations("CompanySettings.dangerZone");
   const [expanded, setExpanded] = useState(false);
   const [confirmName, setConfirmName] = useState("");
+  // decisions/0079-outgoing-invoices.md: issued invoices go with the workspace, so the admin
+  // confirms they downloaded them (the retention duty stays with the business).
+  const [invoicesArchived, setInvoicesArchived] = useState(false);
+  const needsInvoiceConfirmation = issuedInvoiceCount > 0;
   const [errorCode, setErrorCode] = useState<WorkspaceActionErrorCode>();
   const [pending, startTransition] = useTransition();
 
   const nameMatches = confirmName.trim() === workspaceName.trim() && confirmName.trim().length > 0;
+  const canDelete = nameMatches && (!needsInvoiceConfirmation || invoicesArchived);
 
   function handleDelete() {
     setErrorCode(undefined);
     startTransition(async () => {
-      const result = await deleteWorkspaceAction({ confirmName });
+      const result = await deleteWorkspaceAction({ confirmName, invoicesArchived });
       // A successful call redirects (throws) inside the action itself; reaching here at all
       // means it returned an error.
       if (result.status === "error") setErrorCode(result.errorCode);
@@ -58,13 +63,30 @@ export function WorkspaceDangerZone({ workspaceName }: { workspaceName: string }
                 autoComplete="off"
               />
             </div>
+            {needsInvoiceConfirmation ? (
+              <div className="flex max-w-xl flex-col gap-2 rounded-lg border border-destructive/40 p-3">
+                <p className="text-sm text-foreground">{t("invoicesNotice", { count: issuedInvoiceCount })}</p>
+                <a href="/api/invoices/export" className="self-start text-sm font-medium text-primary underline underline-offset-4" download>
+                  {t("invoicesDownload")}
+                </a>
+                <label className="flex items-start gap-2 text-sm text-foreground">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={invoicesArchived}
+                    onChange={(event) => setInvoicesArchived(event.target.checked)}
+                  />
+                  <span>{t("invoicesConfirm", { count: issuedInvoiceCount })}</span>
+                </label>
+              </div>
+            ) : null}
             {errorCode ? (
               <p role="alert" className="text-sm text-destructive">
                 {t(`errors.${errorCode}`)}
               </p>
             ) : null}
             <div className="flex gap-2">
-              <Button type="button" variant="destructive" disabled={!nameMatches || pending} aria-busy={pending} onClick={handleDelete}>
+              <Button type="button" variant="destructive" disabled={!canDelete || pending} aria-busy={pending} onClick={handleDelete}>
                 {pending ? t("submitPending") : t("submit")}
               </Button>
               <Button
@@ -74,6 +96,7 @@ export function WorkspaceDangerZone({ workspaceName }: { workspaceName: string }
                 onClick={() => {
                   setExpanded(false);
                   setConfirmName("");
+                  setInvoicesArchived(false);
                   setErrorCode(undefined);
                 }}
               >

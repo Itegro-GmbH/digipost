@@ -24,6 +24,7 @@ import { documents } from "@/persistence/schema/documents";
 import { intakeSourceFingerprints } from "@/persistence/schema/intake-fingerprints";
 import { jobs } from "@/persistence/schema/jobs";
 import { inboundEmails, mailIntakeAllowedSenders, mailIntakeSettings } from "@/persistence/schema/mail-intake";
+import { invoiceDrafts, invoiceEvents, invoiceNumberSequences, invoices } from "@/persistence/schema/invoices";
 import { documentTransactions, paymentAliases, paymentArbiterAnswers, paymentNoDocumentRules, paymentRejections } from "@/persistence/schema/payments";
 import { workspaceInvitations, workspaceMembers } from "@/persistence/schema/workspaces";
 
@@ -543,6 +544,32 @@ describe("createDrizzleWorkspaceRepository.delete (F5, decisions/0027-hardening-
     await db.insert(mailIntakeAllowedSenders).values({ workspaceId: workspace.id, kind: "domain", value: "lieferant.de" });
     await db.insert(inboundEmails).values({ workspaceId: workspace.id, providerEmailId: randomUUID(), fromAddress: "a@lieferant.de" });
 
+    // decisions/0079-outgoing-invoices.md: the invoicing tables. `invoices`/`invoice_events` are
+    // append-only, and this cascade is the one DELETE their trigger lets through.
+    await db.insert(invoiceDrafts).values({ workspaceId: workspace.id, content: {} });
+    await db.insert(invoiceNumberSequences).values({ workspaceId: workspace.id, year: 2026, lastValue: 1 });
+    const invoiceId = randomUUID();
+    await db.insert(invoices).values({
+      id: invoiceId,
+      workspaceId: workspace.id,
+      number: "2026-0001",
+      year: 2026,
+      sequence: 1,
+      type: "invoice",
+      issueDate: "2026-11-05",
+      currency: "EUR",
+      netCents: 100,
+      vatCents: 19,
+      grossCents: 119,
+      buyerName: "Kunde KG",
+      einvoiceInput: {} as never,
+      pdfStorageKey: "k.pdf",
+      xmlStorageKey: "k.xml",
+      pdfSha256: "a",
+      xmlSha256: "b",
+    });
+    await db.insert(invoiceEvents).values({ workspaceId: workspace.id, invoiceId, kind: "issued" });
+
     // A second workspace's own document, to prove the delete below never reaches it.
     const [otherDocument] = await db
       .insert(documents)
@@ -582,6 +609,10 @@ describe("createDrizzleWorkspaceRepository.delete (F5, decisions/0027-hardening-
     expect(await db.select().from(mailIntakeSettings).where(eq(mailIntakeSettings.workspaceId, workspace.id))).toHaveLength(0);
     expect(await db.select().from(mailIntakeAllowedSenders).where(eq(mailIntakeAllowedSenders.workspaceId, workspace.id))).toHaveLength(0);
     expect(await db.select().from(inboundEmails).where(eq(inboundEmails.workspaceId, workspace.id))).toHaveLength(0);
+    expect(await db.select().from(invoiceDrafts).where(eq(invoiceDrafts.workspaceId, workspace.id))).toHaveLength(0);
+    expect(await db.select().from(invoiceNumberSequences).where(eq(invoiceNumberSequences.workspaceId, workspace.id))).toHaveLength(0);
+    expect(await db.select().from(invoices).where(eq(invoices.workspaceId, workspace.id))).toHaveLength(0);
+    expect(await db.select().from(invoiceEvents).where(eq(invoiceEvents.workspaceId, workspace.id))).toHaveLength(0);
     // `document_contacts` has no `workspace_id` column of its own - scoped via the document
     // it cascaded from instead.
     expect(await db.select().from(documentContacts).where(eq(documentContacts.documentId, document.id))).toHaveLength(0);

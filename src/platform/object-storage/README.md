@@ -12,7 +12,7 @@ Maintenance triggers:
 - The `ObjectStorage` interface's methods or their inputs change
 - `S3_*` environment variables change (`src/platform/env/server/env.ts`)
 - The MinIO image or setup in `docker/compose.yml` / `docker/compose.test.yml` changes
-Last verified: 2026-09-20, F5 (decisions/0027-hardening-and-deletion.md): added
+Last verified: 2026-11-05, decisions/0079-outgoing-invoices.md: added `invoiceFileKey`. Previously 2026-09-20, F5 (decisions/0027-hardening-and-deletion.md): added
 `listObjects(prefix)`/`deleteObjects(keys)` (paginated `ListObjectsV2`/batched
 `DeleteObjects`) and `workspaceStoragePrefix(workspaceId)` - workspace deletion's storage
 cleanup needs to remove every object under a prefix, not one known key at a time, the first
@@ -40,6 +40,7 @@ builders below.
 | `documentOriginalKey({ workspaceId, documentId })` | function | `workspaces/<workspaceId>/documents/<documentId>/original.pdf` |
 | `documentSearchableKey({ workspaceId, documentId })` | function | `workspaces/<workspaceId>/documents/<documentId>/searchable.pdf` |
 | `workspaceStoragePrefix(workspaceId)` | function | `workspaces/<workspaceId>/` (F5) - the common prefix of every object a workspace owns |
+| `invoiceFileKey({ workspaceId, invoiceId, format })` | function | `workspaces/<workspaceId>/invoices/<invoiceId>/invoice.pdf` or `.../factur-x.xml` (decisions/0079-outgoing-invoices.md) - an issued invoice's archived files, apart from its inbox document's own copy |
 | `InvalidObjectKeySegmentError` | class | Thrown by the key builders when `workspaceId`/`documentId` is not a syntactically valid UUID |
 | `ObjectNotFoundError` | class | Thrown by `getObject` for a missing key |
 

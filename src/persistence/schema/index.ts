@@ -10,7 +10,9 @@
 // accounts.ts -> src/modules/accounts (decisions/0024-accounts-and-transactions.md),
 // payments.ts -> src/modules/payments (F3b, decisions/0025-payment-matching-wiring.md),
 // mail-intake.ts -> src/modules/mail-intake (decisions/0075-email-intake.md, references only
-// workspaces.ts/auth.ts, so its position after them is all it needs). Load
+// workspaces.ts/auth.ts, so its position after them is all it needs), invoices.ts ->
+// src/modules/invoicing (decisions/0079-outgoing-invoices.md, references auth.ts/contacts.ts/
+// workspaces.ts). Load
 // order matters here: contacts.ts, intake-fingerprints.ts, and accounts.ts each reference
 // workspaces.ts (and/or documents.ts), so all three are exported last; payments.ts references
 // accounts.ts/contacts.ts/documents.ts in turn, so it is exported last of all.
@@ -24,3 +26,4 @@ export * from "./intake-fingerprints";
 export * from "./accounts";
 export * from "./payments";
 export * from "./mail-intake";
+export * from "./invoices";

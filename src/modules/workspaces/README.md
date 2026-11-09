@@ -14,7 +14,7 @@ Maintenance triggers:
 - `src/platform/access`'s permission bundles change what this module's actions check
 - The company-profile onboarding/settings fields or the "profile incomplete" banner's
   condition change (decisions/0021-extraction-direction-and-invoice-fields.md, C2)
-Last verified: 2026-10-03, decisions/0070-several-workspaces-per-user.md: a user may belong to
+Last verified: 2026-11-05, decisions/0079-outgoing-invoices.md: workspace deletion requires `invoicesArchived` once the workspace issued invoices. Previously 2026-10-03, decisions/0070-several-workspaces-per-user.md: a user may belong to
 SEVERAL workspaces. `workspace_members.user_id` lost its unique constraint; a composite unique
 on `(workspace_id, user_id)` plus a plain index on `user_id` replaced it (migration
 `0021_glamorous_epoch.sql`). `WorkspaceUseCases` gained `listMembershipsForUser(userId)`
@@ -131,6 +131,14 @@ pending per workspace) plus a German invitation e-mail (`server/emails/invitatio
 containing the `/invite/<token>` link. The invitee signs in via magic link and accepts -
 acceptance and the membership insert happen in one transaction
 (`src/persistence/use-cases/workspaces-use-cases.ts`'s `acceptInvitation`).
+
+### Deleting a workspace that issued invoices
+
+decisions/0079-outgoing-invoices.md: issued invoices are append-only and the workspace cascade is
+the only way they are ever removed, so `deleteWorkspace` additionally requires
+`invoicesArchived: true` once the workspace has issued any (`WORKSPACE_ERROR.invoicesNotArchived`
+otherwise, checked inside the same transaction as the delete). The danger zone shows how many
+there are, links the ZIP of all of them (`GET /api/invoices/export`) and asks for that confirmation.
 
 ## Public interfaces
 
