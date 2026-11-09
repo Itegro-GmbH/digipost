@@ -458,7 +458,7 @@ describe("deleteWorkspaceAction (F5, decisions/0027-hardening-and-deletion.md)",
 
     await expect(deleteWorkspaceAction({ confirmName: "Muster GmbH" })).rejects.toThrow("REDIRECT:/onboarding");
 
-    expect(workspacesUseCases.deleteWorkspace).toHaveBeenCalledWith({ workspaceId: "w1", confirmName: "Muster GmbH" });
+    expect(workspacesUseCases.deleteWorkspace).toHaveBeenCalledWith({ workspaceId: "w1", confirmName: "Muster GmbH", invoicesArchived: false });
     expect(objectStorageListObjects).toHaveBeenCalledWith("workspaces/w1/");
     expect(objectStorageDeleteObjects).toHaveBeenCalledWith(["workspaces/w1/documents/d1/original.pdf"]);
     expect(clearActiveWorkspaceCookie).toHaveBeenCalled();

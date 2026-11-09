@@ -63,7 +63,7 @@ import {
   type TabularProposalIntakeResult,
   type ZugferdExtraction,
 } from "@/modules/documents";
-import { isOwnCompany, normalizeIban, normalizeName, type DocumentContactRole, type OwnCompanyProfile } from "@/modules/contacts";
+import { isOwnCompany, normalizeIban, normalizeName, type DocumentContactRole, type ExtractedContactData, type OwnCompanyProfile } from "@/modules/contacts";
 import {
   APPLE_PAYMENT_SUMMARY_ERROR,
   ApplePaymentSummaryParseError,
@@ -73,6 +73,7 @@ import {
   detectCamt053,
   detectGooglePlayEarnings,
   extractEmbeddedXml,
+  fileHash as hashFileBytes,
   GOOGLE_PLAY_EARNINGS_ERROR,
   GooglePlayEarningsParseError,
   MT940_MIME_TYPE,
@@ -278,6 +279,30 @@ export type ImportAccountTransactionsInput = { workspaceId: string; documentId: 
  * queue's own retry/backoff applies to each deletion independently. */
 export type PurgeRejectedIntakeInput = { workspaceId: string; documentId: string };
 
+/** decisions/0079-outgoing-invoices.md: what `createForIssuedInvoice` needs about an invoice
+ * Digipost itself just issued. Every value comes from the issued invoice, never from OCR. */
+export type IssuedInvoiceDocumentInput = {
+  workspaceId: string;
+  issuedByUserId: string | null;
+  fileName: string;
+  pdfBytes: Uint8Array;
+  pageCount: number;
+  invoiceNumber: string;
+  issueDate: string;
+  dueDate: string | null;
+  /** Gross amount; negative for a cancellation (decisions/0069: money going back out). */
+  totalAmountCents: number;
+  currency: string;
+  paymentIban: string | null;
+  sellerName: string;
+  title: string;
+  summary: string;
+  /** What the inbox's full-text search should find it by (number, buyer, line texts). */
+  searchText: string;
+  /** For a cancellation: the inbox document of the invoice it cancels, if it still exists. */
+  cancelsDocumentId: string | null;
+};
+
 export interface DocumentUseCases {
   /** F1b generalizes this from "always a PDF" to "any accepted content" (decisions/0020-universal-intake.md):
    * `mimeType`/`extension` describe what was actually stored (`"application/pdf"`/`"pdf"` for
@@ -296,6 +321,24 @@ export interface DocumentUseCases {
     pageCount: number;
     fileHash: string;
   }): Promise<Document>;
+  /** decisions/0079-outgoing-invoices.md: the fast, non-transactional half of the quota check
+   * an issued invoice's inbox document gets, before anything is rendered. Throws
+   * `quota_total_exceeded`/`quota_monthly_exceeded` exactly like an upload's pre-check. */
+  precheckQuota(workspaceId: string): Promise<void>;
+  /** decisions/0079-outgoing-invoices.md: the inbox document of an invoice Digipost itself just
+   * issued, created INSIDE the caller's transaction (`repos` is that transaction's bundle, the
+   * same pattern as `BillingUseCases.recordDocumentsCreated`), so the invoice and its document
+   * commit or roll back together. Runs the authoritative quota check with the workspace row
+   * locked, writes the PDF to the document's own storage key, inserts the row as already
+   * processed, counts it in the monthly usage, and schedules payment matching. A cancellation of
+   * an invoice that was never paid settles both documents at once (nothing is owed either way);
+   * a cancellation of a paid one stays open, since the money has to go back. Returns the storage
+   * key so the caller can remove the object if ITS transaction fails later. */
+  createForIssuedInvoice(repos: Repositories, input: IssuedInvoiceDocumentInput): Promise<{ documentId: string; storageKey: string }>;
+  /** decisions/0079: links an issued invoice's buyer as the document's customer contact, after
+   * the issuing transaction committed (contact linking runs its own transactions). Best effort:
+   * a failure is logged, never thrown. */
+  linkIssuedInvoiceCounterparty(input: { workspaceId: string; documentId: string; buyer: ExtractedContactData }): Promise<void>;
   /** decisions/0059-generated-document-names.md: a list row also carries the counterparty the
    * inbox names it after, which only this read resolves (see `DocumentListRow`). */
   list(
@@ -1317,6 +1360,126 @@ export function createDocumentUseCases(deps: DocumentUseCaseDeps): DocumentUseCa
           console.error("[documents] failed to delete orphaned object after a failed upload transaction", cleanupErr);
         });
         throw err;
+      }
+    },
+
+    async precheckQuota(workspaceId) {
+      const workspace = await deps.repos.workspace.findById(workspaceId);
+      if (!workspace) throw new UseCaseError(DOCUMENT_ERROR.notFound);
+      const stored = await deps.repos.document.countByWorkspace(workspaceId);
+      const usage = await deps.billing.getUsage(workspaceId, now());
+      const check = evaluateQuota({
+        tier: workspace.tier as Tier,
+        storedDocuments: stored,
+        createdThisMonth: usage.createdThisMonth,
+        extraMonthlyQuota: usage.extraMonthlyQuota,
+        adding: 1,
+      });
+      if (!check.allowed) throw new UseCaseError(check.code);
+    },
+
+    async createForIssuedInvoice(repos, input) {
+      const { workspaceId } = input;
+      // The authoritative check, exactly `createFromUpload`'s: with the workspace row locked,
+      // which also serializes this against every concurrent upload of the same workspace.
+      const workspace = await repos.workspace.lockForUpdate(workspaceId);
+      if (!workspace) throw new UseCaseError(DOCUMENT_ERROR.notFound);
+      const stored = await repos.document.countByWorkspace(workspaceId);
+      const at = now();
+      const usage = await deps.billing.getUsage(workspaceId, at, repos);
+      const check = evaluateQuota({
+        tier: workspace.tier as Tier,
+        storedDocuments: stored,
+        createdThisMonth: usage.createdThisMonth,
+        extraMonthlyQuota: usage.extraMonthlyQuota,
+        adding: 1,
+      });
+      if (!check.allowed) throw new UseCaseError(check.code);
+
+      const documentId = generateId();
+      const storageKey = documentOriginalKey({ workspaceId, documentId, extension: "pdf" });
+      await deps.objectStorage.putObject({ key: storageKey, body: input.pdfBytes, contentType: "application/pdf" });
+
+      try {
+        // decisions/0079: cancelling an invoice nobody paid leaves nothing to pay in either
+        // direction, so both documents are settled together and neither waits in "Offene
+        // Posten". A paid (or partly paid) one stays as it is, and the cancellation is an open
+        // credit (decisions/0069) that matching pairs with the refund.
+        let paymentStatus: PaymentStatus = PAYMENT_STATUSES.open;
+        if (input.cancelsDocumentId) {
+          const original = await repos.document.findById(workspaceId, input.cancelsDocumentId);
+          if (original && (original.paymentStatus === PAYMENT_STATUSES.open || original.paymentStatus === PAYMENT_STATUSES.overdue)) {
+            await repos.document.updatePaymentStatus(workspaceId, original.id, { paymentStatus: PAYMENT_STATUSES.settled, paidAt: at });
+            paymentStatus = PAYMENT_STATUSES.settled;
+          }
+        }
+
+        await repos.document.createIssuedInvoice({
+          id: documentId,
+          workspaceId,
+          uploadedByUserId: input.issuedByUserId,
+          originalFileName: input.fileName,
+          mimeType: "application/pdf",
+          pageCount: input.pageCount,
+          sizeBytes: input.pdfBytes.byteLength,
+          storageKey,
+          fileHash: hashFileBytes(input.pdfBytes),
+          title: input.title,
+          sender: input.sellerName,
+          documentDate: input.issueDate,
+          summary: input.summary,
+          ocrText: input.searchText,
+          invoiceNumber: input.invoiceNumber,
+          totalAmountCents: input.totalAmountCents,
+          currency: input.currency,
+          dueDate: input.dueDate,
+          paymentIban: input.paymentIban,
+          paymentReference: input.invoiceNumber,
+          paymentStatus,
+        });
+
+        await deps.billing.recordDocumentsCreated(repos, {
+          workspaceId,
+          period: periodKeyFor(at),
+          count: 1,
+          totalRatio: check.totalRatio,
+          monthlyRatio: check.monthlyRatio,
+        });
+
+        if (paymentStatus === PAYMENT_STATUSES.open) {
+          await repos.jobs.scheduleNow({
+            kind: JOB_KINDS.matchPayments,
+            workspaceId,
+            payload: { workspaceId, trigger: "document_done" } satisfies MatchPaymentsInput,
+            now: at,
+          });
+        }
+      } catch (err) {
+        await deps.objectStorage.deleteObject(storageKey).catch((cleanupErr: unknown) => {
+          console.error("[documents] failed to delete an issued invoice's object after a failed insert", cleanupErr);
+        });
+        throw err;
+      }
+
+      return { documentId, storageKey };
+    },
+
+    async linkIssuedInvoiceCounterparty({ workspaceId, documentId, buyer }) {
+      const workspace = await deps.repos.workspace.findById(workspaceId);
+      if (!workspace) return;
+      const ownCompany = toOwnCompanyProfile(workspace);
+      const plan = planCounterparty("outgoing_invoice");
+      if (plan.mode !== "derived") return;
+      try {
+        await deps.contacts.replaceDocumentLinks({
+          workspaceId,
+          documentId,
+          ownCompany,
+          ownIbans: ownCompany.ibans,
+          parties: [{ role: plan.counterpartyRole, relationType: plan.relationType, extracted: buyer }],
+        });
+      } catch (err) {
+        console.error("[documents] failed to link an issued invoice's buyer", { workspaceId, documentId, err });
       }
     },
 

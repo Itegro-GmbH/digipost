@@ -33,12 +33,14 @@ import { createBillingUseCases } from "@/persistence/use-cases/billing-use-cases
 import { createClosingUseCases } from "@/persistence/use-cases/closing-use-cases";
 import { createContactUseCases } from "@/persistence/use-cases/contacts-use-cases";
 import { createDocumentUseCases } from "@/persistence/use-cases/documents-use-cases";
+import { createInvoiceUseCases } from "@/persistence/use-cases/invoices-use-cases";
 import { createJobsUseCases } from "@/persistence/use-cases/jobs-use-cases";
 import { createMailIntakeUseCases } from "@/persistence/use-cases/mail-intake-use-cases";
 import { createPaymentsUseCases } from "@/persistence/use-cases/payments-use-cases";
 import { createSystemUseCases } from "@/persistence/use-cases/system-use-cases";
 import { createWorkspaceUseCases } from "@/persistence/use-cases/workspaces-use-cases";
 import { getPaymentProvider } from "@/modules/billing/server";
+import { getInvoiceRenderer } from "@/modules/invoicing/server";
 import { createSmtpMailer } from "@/platform/mailer/server";
 import { getDocumentAnalyzer, getIntakeClassifier, getOcrEngine, getPaymentArbiter } from "@/platform/mistral/server";
 import { getInboundEmailDomain, getInboundMailProvider } from "@/platform/inbound-mail/server";
@@ -95,6 +97,12 @@ export function createRequestServices() {
     inboundDomain: getInboundEmailDomain(),
   });
 
+  // decisions/0079-outgoing-invoices.md: writing invoices gets the already-built `documents`
+  // (every issued invoice also lands in the inbox, through `createForIssuedInvoice`, inside the
+  // issuing transaction) and the `InvoiceRenderer` port bound to `@itegro/einvoice`, the same
+  // lazy-singleton shape as `getObjectStorage()`.
+  const invoices = createInvoiceUseCases({ repos, uow, objectStorage, renderer: getInvoiceRenderer(), documents });
+
   // "Handlers registered where they belong" (decisions/0016-processing-pipeline-and-ai.md):
   // `src/platform/jobs`'s generic runner never sees `documents`/`billing`/`workspaces`/
   // `accounts`/`payments`/`mailer` directly, only this kind -> handler map, built once here
@@ -116,6 +124,7 @@ export function createRequestServices() {
     payments,
     closing,
     mailIntake,
+    invoices,
     jobs: createJobsUseCases({ repos, uow, handlers: jobHandlers }),
   };
 }

@@ -16,7 +16,7 @@ import {
   memberRow,
   workspaceRow,
 } from "@/persistence/tests/support/fake-workspaces-repositories";
-import type { UnitOfWork } from "@/persistence/repositories/contracts";
+import type { InvoiceRepository, UnitOfWork } from "@/persistence/repositories/contracts";
 import {
   MAX_COMPANY_PROFILE_LIST_ENTRIES,
   MAX_PENDING_INVITATIONS,
@@ -41,6 +41,8 @@ function setup(options: {
   jobs?: Parameters<typeof createFakeJobsRepository>[0];
   now?: () => Date;
   generateToken?: () => string;
+  /** decisions/0079-outgoing-invoices.md: how many invoices the workspace has issued. */
+  issuedInvoices?: number;
 } = {}) {
   const { repo: workspace, state: workspaceState } = createFakeWorkspaceRepository(options.workspaces);
   // The member fake joins against the workspace fake's own live row array
@@ -55,7 +57,9 @@ function setup(options: {
     options.details,
   );
   const { repo: jobs, state: jobState } = createFakeJobsRepository(options.jobs);
-  const repos = withUnusedRepositories({ workspace, workspaceMember, workspaceInvitation, jobs });
+  // Only `countInvoices` is ever read by this use case (the deletion's invoice confirmation).
+  const invoice = { countInvoices: async () => options.issuedInvoices ?? 0 } as unknown as InvoiceRepository;
+  const repos = withUnusedRepositories({ workspace, workspaceMember, workspaceInvitation, jobs, invoice });
   const uow: UnitOfWork = { transaction: (work) => work(repos) };
   const useCases = createWorkspaceUseCases({
     repos,
@@ -872,7 +876,7 @@ describe("createWorkspaceUseCases", () => {
       const workspace = workspaceRow({ id: WORKSPACE_UUID, name: "Muster GmbH" });
       const { useCases, workspaceState, jobState } = setup({ workspaces: [workspace] });
 
-      const result = await useCases.deleteWorkspace({ workspaceId: WORKSPACE_UUID, confirmName: "Muster GmbH" });
+      const result = await useCases.deleteWorkspace({ workspaceId: WORKSPACE_UUID, confirmName: "Muster GmbH", invoicesArchived: false });
 
       expect(result.storagePrefix).toBe(`workspaces/${WORKSPACE_UUID}/`);
       expect(workspaceState).toHaveLength(0);
@@ -892,7 +896,7 @@ describe("createWorkspaceUseCases", () => {
       const workspace = workspaceRow({ id: WORKSPACE_UUID, name: "Muster GmbH" });
       const { useCases, workspaceState } = setup({ workspaces: [workspace] });
 
-      await useCases.deleteWorkspace({ workspaceId: WORKSPACE_UUID, confirmName: "  Muster GmbH  " });
+      await useCases.deleteWorkspace({ workspaceId: WORKSPACE_UUID, confirmName: "  Muster GmbH  ", invoicesArchived: false });
 
       expect(workspaceState).toHaveLength(0);
     });
@@ -901,16 +905,38 @@ describe("createWorkspaceUseCases", () => {
       const workspace = workspaceRow({ id: "w1", name: "Muster GmbH" });
       const { useCases, workspaceState, jobState } = setup({ workspaces: [workspace] });
 
-      await expect(useCases.deleteWorkspace({ workspaceId: "w1", confirmName: "Wrong Name" })).rejects.toMatchObject({
+      await expect(useCases.deleteWorkspace({ workspaceId: "w1", confirmName: "Wrong Name", invoicesArchived: false })).rejects.toMatchObject({
         code: WORKSPACE_ERROR.confirmationMismatch,
       });
       expect(workspaceState).toHaveLength(1);
       expect(jobState).toHaveLength(0);
     });
 
+    // decisions/0079-outgoing-invoices.md: issued invoices go with the workspace only once the
+    // admin confirmed they downloaded every one.
+    it("refuses a workspace with issued invoices without the archive confirmation", async () => {
+      const workspace = workspaceRow({ id: WORKSPACE_UUID, name: "Muster GmbH" });
+      const { useCases, workspaceState, jobState } = setup({ workspaces: [workspace], issuedInvoices: 3 });
+
+      await expect(useCases.deleteWorkspace({ workspaceId: WORKSPACE_UUID, confirmName: "Muster GmbH", invoicesArchived: false })).rejects.toMatchObject({
+        code: WORKSPACE_ERROR.invoicesNotArchived,
+      });
+      expect(workspaceState).toHaveLength(1);
+      expect(jobState).toHaveLength(0);
+    });
+
+    it("deletes a workspace with issued invoices once the admin confirmed the download", async () => {
+      const workspace = workspaceRow({ id: WORKSPACE_UUID, name: "Muster GmbH" });
+      const { useCases, workspaceState } = setup({ workspaces: [workspace], issuedInvoices: 3 });
+
+      await useCases.deleteWorkspace({ workspaceId: WORKSPACE_UUID, confirmName: "Muster GmbH", invoicesArchived: true });
+
+      expect(workspaceState).toHaveLength(0);
+    });
+
     it("rejects a workspace that does not exist with not_found", async () => {
       const { useCases } = setup();
-      await expect(useCases.deleteWorkspace({ workspaceId: "does-not-exist", confirmName: "anything" })).rejects.toMatchObject({
+      await expect(useCases.deleteWorkspace({ workspaceId: "does-not-exist", confirmName: "anything", invoicesArchived: false })).rejects.toMatchObject({
         code: WORKSPACE_ERROR.notFound,
       });
     });

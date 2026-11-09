@@ -60,6 +60,25 @@ export type DocumentWithRelations = DocumentRow & {
  * field is `null` for a non-invoice document, or when the analyzer found nothing invoice-shaped
  * - parsed from the model's raw text in code (`@/modules/documents`'s amount/date parsing),
  * never trusted as already-structured. */
+/** decisions/0079-outgoing-invoices.md: an invoice Digipost itself issued, stored as an
+ * already-processed outgoing document (`status: "done"`). Nothing about it is extracted or
+ * guessed: every field comes from the issued invoice itself, so it never goes through OCR or a
+ * model call. `searchablePdfKey` stays `null` (the generated PDF already has a text layer), so
+ * downloads fall back to the original, which is that PDF. */
+export type CreateIssuedInvoiceDocumentRow = CreateDocumentRow & {
+  title: string;
+  sender: string;
+  documentDate: string;
+  summary: string;
+  ocrText: string;
+  invoiceNumber: string;
+  totalAmountCents: number;
+  currency: string;
+  dueDate: string | null;
+  paymentIban: string | null;
+  paymentReference: string;
+  paymentStatus: PaymentStatus;
+};
 export type MarkDocumentDoneInput = {
   ocrText: string;
   ocrBlocks: unknown;
@@ -269,6 +288,9 @@ export type ListDocumentsResult = {
 
 export interface DocumentRepository {
   create(input: CreateDocumentRow): Promise<DocumentRow>;
+  /** decisions/0079-outgoing-invoices.md: inserts an issued invoice's document as already
+   * processed (`kind: "outgoing_invoice"`, `direction: "outgoing"`, `status: "done"`). */
+  createIssuedInvoice(input: CreateIssuedInvoiceDocumentRow): Promise<DocumentRow>;
   /** Documents currently stored in the workspace, any status (architecture brief's product
    * decision 1: the total limit counts current stock, deleting frees capacity). */
   countByWorkspace(workspaceId: string): Promise<number>;

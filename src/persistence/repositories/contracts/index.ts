@@ -20,6 +20,7 @@ import type { BillingRepository } from "./billing-repository";
 import type { ContactProposalRepository, ContactRepository, DocumentContactRepository } from "./contacts-repository";
 import type { DocumentRepository } from "./documents-repository";
 import type { IntakeFingerprintRepository } from "./intake-fingerprints-repository";
+import type { InvoiceRepository } from "./invoices-repository";
 import type { JobsRepository } from "./jobs-repository";
 import type { MailIntakeRepository } from "./mail-intake-repository";
 import type {
@@ -57,6 +58,7 @@ export type {
   ClosingDocumentRow,
   ClosingLinkedTransaction,
   CreateDocumentRow,
+  CreateIssuedInvoiceDocumentRow,
   DocumentDirection,
   DocumentIntakeStatus,
   DocumentKind,
@@ -136,6 +138,15 @@ export type {
   UpdateInboundEmailPatch,
 } from "./mail-intake-repository";
 export type {
+  CreateInvoiceEventRow,
+  CreateInvoiceRow,
+  InvoiceDraftRow,
+  InvoiceEventRow,
+  InvoiceRepository,
+  InvoiceRow,
+  InvoiceWithCounterpart,
+} from "./invoices-repository";
+export type {
   CreateDocumentTransactionRow,
   DecideDocumentTransactionInput,
   DocumentTransactionRepository,
@@ -175,6 +186,8 @@ export type Repositories = {
   paymentArbiterAnswer: PaymentArbiterAnswerRepository;
   /** decisions/0075-email-intake.md, owner `src/modules/mail-intake`. */
   mailIntake: MailIntakeRepository;
+  /** decisions/0079-outgoing-invoices.md, owner `src/modules/invoicing`. */
+  invoice: InvoiceRepository;
   // … one entry per repository
 };
 

@@ -47,7 +47,8 @@ function mapUseCaseError(err: unknown): WorkspaceActionErrorCode {
       code === WORKSPACE_ERROR.invitationEmailMismatch ||
       code === WORKSPACE_ERROR.confirmationMismatch ||
       code === WORKSPACE_ERROR.cannotLeaveAsAdmin ||
-      code === WORKSPACE_ERROR.aliasTooGeneric
+      code === WORKSPACE_ERROR.aliasTooGeneric ||
+      code === WORKSPACE_ERROR.invoicesNotArchived
     ) {
       return code;
     }
@@ -349,7 +350,8 @@ export async function switchWorkspaceAction(
  * intake fingerprint the workspace owns, then every object-storage object under
  * `workspaces/<id>/`. Admin-only (`workspace.manage`). `confirmName` must exactly match the
  * workspace's current name - re-validated server-side by the use case, never trusted from
- * this action's own input parsing alone.
+ * this action's own input parsing alone. A workspace with issued invoices also needs
+ * `invoicesArchived: true` (decisions/0079-outgoing-invoices.md).
  */
 export async function deleteWorkspaceAction(
   input: unknown,
@@ -365,6 +367,7 @@ export async function deleteWorkspaceAction(
     const result = await getRequestServices().workspaces.deleteWorkspace({
       workspaceId: access.access.workspace.id,
       confirmName: parsed.data.confirmName,
+      invoicesArchived: parsed.data.invoicesArchived,
     });
     storagePrefix = result.storagePrefix;
   } catch (err) {

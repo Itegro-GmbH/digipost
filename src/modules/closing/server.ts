@@ -10,3 +10,6 @@ import "server-only";
  */
 export { getClosingReportProjection } from "./server/read-models";
 export { closingExportFileName, createClosingExport, type ClosingExport, type ClosingExportLabels } from "./server/export";
+/** Also used by `src/modules/invoicing`'s invoice archive download (decisions/0079-outgoing-invoices.md),
+ * the one other ZIP this product streams. */
+export { createClosingArchiveStream, type ClosingArchiveEntry } from "./server/export-archive";

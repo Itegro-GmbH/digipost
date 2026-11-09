@@ -98,7 +98,12 @@ export const switchWorkspaceInputSchema = z.object({ workspaceId: z.uuid() });
  * empty/oversized string; the actual name comparison happens server-side, in
  * `WorkspaceUseCases.deleteWorkspace`, against the real current name - never trusted from
  * the client. */
-export const deleteWorkspaceInputSchema = z.object({ confirmName: workspaceName });
+export const deleteWorkspaceInputSchema = z.object({
+  confirmName: workspaceName,
+  /** decisions/0079-outgoing-invoices.md: the admin confirmed every issued invoice was
+   * downloaded. Required by the use case only when the workspace has issued any. */
+  invoicesArchived: z.boolean().default(false),
+});
 // Tokens are 32 random bytes, hex-encoded (64 characters) - a generous range keeps this
 // schema from being the thing that breaks if the token's byte length ever changes.
 export const acceptInvitationInputSchema = z.object({ token: z.string().trim().min(32).max(256) });

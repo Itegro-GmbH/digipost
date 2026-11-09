@@ -79,6 +79,12 @@ export function createFakeDocumentRepository(
       return row;
     },
 
+    async createIssuedInvoice(input) {
+      const row = documentRow({ ...input, kind: "outgoing_invoice", direction: "outgoing", status: "done", processedAt: new Date() });
+      rows.push(row);
+      return row;
+    },
+
     async countByWorkspace(workspaceId) {
       return rows.filter((r) => r.workspaceId === workspaceId).length;
     },

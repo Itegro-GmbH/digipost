@@ -13,7 +13,7 @@ Maintenance triggers:
 - The export's sheets, columns, cross-reference wording, "Erledigung" values, open-item rule,
   or file-naming rule change
 - A real DATEV Buchungsstapel lands and this module stops being the only handover format
-Last verified: 2026-11-02, the workbook is now "Belege" (with "Erledigung" and "Zahlung(en)"
+Last verified: 2026-11-05, decisions/0079-outgoing-invoices.md: `server.ts` also exports `createClosingArchiveStream` for the invoice archive. Previously 2026-11-02, the workbook is now "Belege" (with "Erledigung" and "Zahlung(en)"
 per payment), "Buchungen" and a new "Offene Posten" sheet read against the period's last day;
 the "Zuordnungen" sheet is gone (decisions/0066's "Offene Posten instead of Zuordnungen",
 checked against the owner's real August 2026). Previously, 2026-10-03, every check item's link
@@ -283,6 +283,12 @@ transactions and the export contains every amount in the period
 The workspace always comes from the resolved session. The only thing a caller may choose is the
 period, which `parseClosingPeriod` validates to a bounded `YYYY-MM`/`YYYY` before it reaches
 any query.
+
+## Shared with invoicing
+
+`server.ts` also exports `createClosingArchiveStream`: `src/modules/invoicing`'s archive of every
+issued invoice (`GET /api/invoices/export`, decisions/0079-outgoing-invoices.md) streams through the
+same backpressured ZIP writer rather than a second copy of it.
 
 ## Dependencies on other owners
 

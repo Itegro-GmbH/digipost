@@ -183,6 +183,20 @@
       "when": 1793720924857,
       "tag": "0025_sudden_sheva_callister",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1793895514427,
+      "tag": "0026_lucky_zarek",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1793895548879,
+      "tag": "0027_invoices_append_only",
+      "breakpoints": true
     }
   ]
 }

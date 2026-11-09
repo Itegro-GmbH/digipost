@@ -15,7 +15,9 @@ Maintenance triggers:
 - A new vendor SDK or a new sensitive env var is introduced
 - `scripts/structure/**` gains or loses a rule (keep the rule table and the
   ```structure block names in 1:1 correspondence, enforced by the checker itself)
-Last verified: 2026-11-03, decisions/0078-mcp-server.md added `src/modules/mcp` as a new owner
+Last verified: 2026-11-05, decisions/0079-outgoing-invoices.md added `src/modules/invoicing` as a
+new owner under the existing container rules, and named `@itegro/einvoice` among the unrestricted
+general-purpose libraries in §11. Previously, 2026-11-03, decisions/0078-mcp-server.md added `src/modules/mcp` as a new owner
 under the existing container rule, the `vendor-sdk` rows `@better-auth/` (confined to
 `src/platform/auth/` like `better-auth` itself) and `@modelcontextprotocol/` (confined to
 `src/modules/mcp/`), and `src/platform/auth/server/oauth-grants.ts` as a second importer of the
@@ -553,8 +555,11 @@ exempt - tests and `scripts/db/**`/`tests/e2e/helpers/**` legitimately import
 `drizzle-orm`/`pg` too. Every other package in `package.json` (`@base-ui/react`,
 `class-variance-authority`, `clsx`, `lucide-react`, `next-intl`, `next-themes`,
 `server-only`, `tailwind-merge`, `tw-animate-css`, `zod`, `next`, `react`,
-`react-dom`, `pdf-lib`, `scanic`, `exceljs`, `archiver`) is a general-purpose library, not
-an architecturally sensitive vendor SDK, and is unrestricted by this rule. `exceljs` and
+`react-dom`, `pdf-lib`, `scanic`, `exceljs`, `archiver`, `@itegro/einvoice`) is a general-purpose library, not
+an architecturally sensitive vendor SDK, and is unrestricted by this rule. `@itegro/einvoice` is
+the e-invoice writer (decisions/0079-outgoing-invoices.md): a file-format library like `pdf-lib`
+(no credentials, no network, no table), imported at runtime only by
+`src/modules/invoicing/server/einvoice-renderer.ts` and type-only elsewhere. `exceljs` and
 `archiver` are the Abschluss export's workbook and ZIP writers
 (decisions/0066-abschluss-check-and-export.md): used only in
 `src/modules/closing/server/`, but file-format libraries like `pdf-lib`, not a provider

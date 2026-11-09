@@ -46,6 +46,17 @@ export function documentSearchableKey(input: { workspaceId: string; documentId: 
   return `workspaces/${workspaceId}/documents/${documentId}/searchable.pdf`;
 }
 
+/** decisions/0079-outgoing-invoices.md: `workspaces/<workspaceId>/invoices/<invoiceId>/invoice.pdf`
+ * (the ZUGFeRD PDF/A-3) and `.../factur-x.xml` (the same XML, on its own) of an issued
+ * invoice. Separate from the inbox document's own copy under `documents/`, so deleting that
+ * document never touches the archived invoice; under the workspace prefix, so deleting the
+ * workspace sweeps them with everything else. */
+export function invoiceFileKey(input: { workspaceId: string; invoiceId: string; format: "pdf" | "xml" }): string {
+  const workspaceId = assertUuid("workspaceId", input.workspaceId);
+  const invoiceId = assertUuid("invoiceId", input.invoiceId);
+  return `workspaces/${workspaceId}/invoices/${invoiceId}/${input.format === "pdf" ? "invoice.pdf" : "factur-x.xml"}`;
+}
+
 /** F5 (workspace deletion, decisions/0027-hardening-and-deletion.md): every object this
  * workspace ever owns lives under this one prefix (the key layout's own leading segment,
  * decisions/0012-object-storage.md), so listing and deleting everything under it removes

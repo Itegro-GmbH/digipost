@@ -14,7 +14,7 @@ Maintenance triggers:
   decisions/0070-several-workspaces-per-user.md)
 - `src/modules/workspaces`'s `getMembershipForUser` use case's return shape changes
 - A new route or Server Action needs workspace-scoped access
-Last verified: 2026-11-03, decisions/0078-mcp-server.md: `server/delegated-principal.ts`
+Last verified: 2026-11-05, decisions/0079-outgoing-invoices.md: added `PERMISSIONS.invoicesManage` (`"invoices.manage"`), the first non-document bundle every MEMBER also has (user decision: every member writes invoices). Previously 2026-11-03, decisions/0078-mcp-server.md: `server/delegated-principal.ts`
 (`runAsDelegatedPrincipal`/`currentDelegatedPrincipal`): inside an MCP tool call,
 `getWorkspaceAccess` resolves the verified OAuth token's user instead of the session, and
 `resolveAccess` gained an explicit selection mode (`{ source: "explicit", workspaceId }`): the

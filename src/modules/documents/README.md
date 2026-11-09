@@ -42,7 +42,7 @@ Maintenance triggers:
   its own contents (decisions/0061-a-statement-is-dated-by-its-last-booking.md)
 - The shared effective-date expression (`documentEffectiveDate`) changes - it also scopes
   `src/modules/closing`'s periods (decisions/0066-abschluss-check-and-export.md)
-Last verified: 2026-11-03, decisions/0078-mcp-server.md: added `listDocumentSummariesProjection`/
+Last verified: 2026-11-05, decisions/0079-outgoing-invoices.md: added `precheckQuota`, `createForIssuedInvoice` and `linkIssuedInvoiceCounterparty` (see "Issued invoices"). Previously 2026-11-03, decisions/0078-mcp-server.md: added `listDocumentSummariesProjection`/
 `getDocumentDownloadUrlProjection` (with `DocumentRepository.listSummaries`, which shares
 `list`'s WHERE/ORDER BY through one `listPlan`, and `DocumentUseCases.getDownloadUrl`) for the MCP
 server. Previously 2026-10-22, decisions/0076-match-after-every-trigger.md: a document finishing
@@ -588,6 +588,21 @@ quota semantics; decisions/0016-processing-pipeline-and-ai.md for the processing
 - `ui/intake-settings-client.tsx` (F1b) - `IntakeSettingsClient`: `/dashboard/settings/intake`'s
   table of confirmed source fingerprints (kind, platform, use count, last used) with
   "Zuordnung zurücksetzen" per row (`resetIntakeFingerprintAction`).
+
+## Issued invoices
+
+decisions/0079-outgoing-invoices.md: an invoice issued in Digipost (`src/modules/invoicing`) also
+becomes an inbox document, created by this owner, never by invoicing. `precheckQuota` is the fast
+half of the quota check, before anything is rendered. `createForIssuedInvoice(repos, input)` runs
+INSIDE invoicing's issuing transaction (`repos` is that transaction's bundle): the authoritative
+quota check with the workspace row locked, the PDF under this document's own
+`documents/<id>/original.pdf` key, the row inserted already processed
+(`DocumentRepository.createIssuedInvoice`: `outgoing_invoice`, `outgoing`, `done`, no OCR, no
+model call, every field from the invoice), the monthly usage counted, and payment matching
+scheduled. A cancellation of an unpaid invoice settles both documents; of a paid one, it stays an
+open credit (decisions/0069). `linkIssuedInvoiceCounterparty` links the buyer as the customer
+contact after commit, best effort. Deleting such a document from the inbox frees quota like any
+other and never touches the archived invoice.
 
 ## Dependencies on other owners
 

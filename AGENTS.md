@@ -9,7 +9,9 @@ Maintenance triggers:
 - Repository-wide safety or workflow rules change
 - STRUCTURE.md or the structure checker lands and changes what is machine-enforced
 - Documentation governance rules in DOC_RULES.md change
-Last verified: 2026-11-03, decisions/0078-mcp-server.md: added the `src/modules/mcp` owner, the
+Last verified: 2026-11-05, decisions/0079-outgoing-invoices.md: added the `src/modules/invoicing`
+owner, its tables to "only the owning module writes", and the "Issued invoices are append-only"
+rule. Previously 2026-11-03, decisions/0078-mcp-server.md: added the `src/modules/mcp` owner, the
 MCP server under "Workspace scoping" (not an exception: the token's user, `resolveAccess`), and
 AI clients to the "Mistral and personal data" rule. Previously 2026-10-22, decisions/0075-email-intake.md: added the `src/modules/mail-intake`
 + `src/platform/inbound-mail` owners, the webhook's workspace-scoping exception, and Resend to
@@ -104,6 +106,12 @@ detail; `decisions/README.md` indexes the ADR behind each one):
   verification, grants, rate limit) lives in `src/platform/auth`; tool calls run as the token's
   user through `src/platform/access`'s `runAsDelegatedPrincipal` and the owning modules' own
   read models and Server Actions, decisions/0078-mcp-server.md.
+- `src/modules/invoicing` - writing invoices (`/dashboard/invoices/**`): drafts, "Festschreiben"
+  into a numbered ZUGFeRD invoice through `@itegro/einvoice` (the `InvoiceRenderer` port, its one
+  adapter in `server/einvoice-renderer.ts`), the full cancellation as a new numbered correction
+  invoice, the archive ZIP; every member may write invoices (`invoices.manage`, both roles); each
+  issued invoice also becomes an inbox document through `DocumentUseCases.createForIssuedInvoice`,
+  decisions/0079-outgoing-invoices.md.
 - `src/modules/dashboard-shell`, `src/modules/sign-in`, `src/platform/auth`,
   `src/platform/mailer`, `src/platform/api-pipeline`, `src/platform/observability`,
   `src/platform/env`, `src/persistence`, `src/shared/ui-primitives`, `src/i18n` - the
@@ -173,8 +181,18 @@ Digipost-specific invariants a change must not silently break:
   `contacts`/`document_contacts`/`contact_change_proposals` (owner: `src/modules/contacts`),
   `accounts`/`transactions`/`import_batches`/`settlement_lines` (owner:
   `src/modules/accounts`), and `document_transactions`/`payment_aliases`/
-  `payment_rejections`/`payment_no_document_rules`/`payment_arbiter_answers` (owner: `src/modules/payments`) as to any
-  other table.
+  `payment_rejections`/`payment_no_document_rules`/`payment_arbiter_answers` (owner: `src/modules/payments`), and
+  `invoice_drafts`/`invoice_number_sequences`/`invoices`/`invoice_events` (owner:
+  `src/modules/invoicing`) as to any other table.
+- **Issued invoices are append-only (GoBD).** A row in `invoices` or `invoice_events` is inserted
+  once and never updated or deleted; a correction is a cancellation, i.e. a NEW numbered invoice
+  pointing at the original (decisions/0079-outgoing-invoices.md). The database enforces it (a
+  trigger refusing UPDATE/DELETE/TRUNCATE for every role, and revoked grants for `app_runtime`),
+  with one exception: the cascade of a workspace deletion, which requires the admin's
+  confirmation that every invoice was downloaded. Never add an update/delete method for these
+  tables, a foreign key from them with `on delete set null`/`cascade` to anything but
+  `workspaces`, or a second way to allocate a number (`allocateSequence`, inside the issuing
+  transaction, is what keeps the range gapless).
 - **Nothing is auto-deleted except one thing.** A rejected intake proposal ("Ablehnen" -
   nothing was ever imported from it) older than 30 days is the ONLY row this product ever
   deletes without a human acting on it directly (`GET /api/cron/purge-rejected-intake`,
@@ -189,7 +207,9 @@ Digipost-specific invariants a change must not silently break:
   from `workspaces.id` the same way, or workspace deletion silently leaves its rows behind -
   verify this explicitly (and extend that ADR's table list) whenever a new such table lands,
   and never add a nullable `workspace_id` with no foreign key at all unless it is
-  deliberately a "global, not workspace-owned" marker.
+  deliberately a "global, not workspace-owned" marker. A workspace with issued invoices is deleted only
+  once the admin confirmed they downloaded them (`invoicesArchived`,
+  decisions/0079-outgoing-invoices.md).
 - **German UI, English everything else.** UI copy is German (`src/i18n/messages/de.json`,
   single locale, formal "Sie" register, decisions/0013-german-ui-language.md); code,
   identifiers, comments, commit messages, and documentation stay English regardless (see
