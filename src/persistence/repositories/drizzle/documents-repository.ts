@@ -210,6 +210,16 @@ export function createDrizzleDocumentRepository(db: DbExecutor): DocumentReposit
       return row;
     },
 
+    async createIssuedInvoice(input) {
+      const at = new Date();
+      const [row] = await db
+        .insert(documents)
+        .values({ ...input, kind: "outgoing_invoice", direction: "outgoing", status: "done", processedAt: at, createdAt: at, updatedAt: at })
+        .returning();
+      if (!row) throw new Error("insert into documents returned no row");
+      return row;
+    },
+
     async findByFileHash(workspaceId, fileHash) {
       const [row] = await db
         .select({ id: documents.id, originalFileName: documents.originalFileName })

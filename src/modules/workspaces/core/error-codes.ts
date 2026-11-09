@@ -21,6 +21,9 @@ export const WORKSPACE_ACTION_ERROR_CODES = [
   // below), and onboarding collects `aliases` - the only extended-profile field that can
   // possibly fail there.
   "alias_too_generic",
+  // decisions/0079-outgoing-invoices.md: `deleteWorkspaceAction` without the confirmation that
+  // every issued invoice was downloaded.
+  "invoices_not_archived",
   "unauthenticated",
   "no_workspace",
   "forbidden",

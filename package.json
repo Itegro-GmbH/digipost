@@ -36,6 +36,7 @@
     "@better-auth/cimd": "1.7.12",
     "@better-auth/mcp": "1.7.12",
     "@better-auth/oauth-provider": "1.7.12",
+    "@itegro/einvoice": "^0.1.0",
     "@modelcontextprotocol/server": "2.3.1",
     "@react-email/components": "^1.0.12",
     "@react-email/render": "^2.1.0",

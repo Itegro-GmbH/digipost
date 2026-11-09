@@ -52,6 +52,11 @@ export const WORKSPACE_ERROR = {
   /** decisions/0034: an entry in the extended profile's domain list does not look like a host
    * once normalized (`normalizeCompanyDomain` below). */
   invalidDomain: "invalid_domain",
+  /** decisions/0079-outgoing-invoices.md: `deleteWorkspace` on a workspace that has issued
+   * invoices, without the admin's confirmation that every one of them was downloaded. The
+   * retention duty (section 147 AO) stays with the business once Digipost no longer keeps
+   * them. */
+  invoicesNotArchived: "invoices_not_archived",
 } as const;
 export type WorkspaceErrorCode = (typeof WORKSPACE_ERROR)[keyof typeof WORKSPACE_ERROR];
 
@@ -192,7 +197,7 @@ export interface WorkspaceUseCases {
    * is what makes cleanup eventually-durable regardless. Returns the object-storage prefix
    * (`workspaces/<id>/`) the caller should also try to clean up immediately. `not_found` if
    * the workspace does not exist (a concurrent deletion, or a stale id). */
-  deleteWorkspace(input: { workspaceId: string; confirmName: string }): Promise<{ storagePrefix: string }>;
+  deleteWorkspace(input: { workspaceId: string; confirmName: string; invoicesArchived: boolean }): Promise<{ storagePrefix: string }>;
   /** Read-only lookup for the `/invite/[token]` page before the invitee has signed in or
    * accepted anything. Throws the same stable codes `acceptInvitation` would. */
   previewInvitation(token: string): Promise<InvitationPreview>;
@@ -598,7 +603,7 @@ export function createWorkspaceUseCases(deps: {
       });
     },
 
-    async deleteWorkspace({ workspaceId, confirmName }) {
+    async deleteWorkspace({ workspaceId, confirmName, invoicesArchived }) {
       let storagePrefix: string | undefined;
 
       await deps.uow.transaction(async (repos) => {
@@ -609,6 +614,13 @@ export function createWorkspaceUseCases(deps: {
         if (!workspace) throw new UseCaseError(WORKSPACE_ERROR.notFound);
         if (workspace.name.trim() !== confirmName.trim()) {
           throw new UseCaseError(WORKSPACE_ERROR.confirmationMismatch);
+        }
+        // decisions/0079-outgoing-invoices.md: issued invoices are append-only and otherwise
+        // never deleted; the cascade below is the one way they go, and only once the admin
+        // confirmed they downloaded every one (the read of `src/modules/invoicing`'s own table
+        // is a count, the same "read another owner's repository" pattern used elsewhere).
+        if (!invoicesArchived && (await repos.invoice.countInvoices(workspaceId)) > 0) {
+          throw new UseCaseError(WORKSPACE_ERROR.invoicesNotArchived);
         }
 
         const deleted = await repos.workspace.delete(workspaceId);

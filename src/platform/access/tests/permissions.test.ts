@@ -11,8 +11,8 @@ describe("permissionsForRole", () => {
     }
   });
 
-  it("grants member only the document permissions", () => {
-    expect(permissionsForRole("member")).toEqual([PERMISSIONS.documentsRead, PERMISSIONS.documentsWrite]);
+  it("grants member only the document permissions and writing invoices (decisions/0079)", () => {
+    expect(permissionsForRole("member")).toEqual([PERMISSIONS.documentsRead, PERMISSIONS.documentsWrite, PERMISSIONS.invoicesManage]);
   });
 });
 

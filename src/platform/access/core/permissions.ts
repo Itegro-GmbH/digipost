@@ -40,15 +40,19 @@ export const PERMISSIONS = {
    * log. Admin-only: every member SEES the address (any member may forward mail to it, the
    * same way any member may upload), only the admin decides who may send to it. */
   mailIntakeManage: "mail_intake.manage",
+  /** decisions/0079-outgoing-invoices.md: writing invoices (`/dashboard/invoices`): drafts,
+   * "Festschreiben" and "Stornieren". Every member has it (user decision), like the document
+   * permissions: issuing an invoice is everyday work, not a workspace setting. */
+  invoicesManage: "invoices.manage",
 } as const;
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
 
 /** `admin` gets every permission that exists today; `member` gets only the document
  * permissions every workspace member shares (PRD: everyone reads/writes documents, only
- * the admin manages members and billing). */
+ * the admin manages members and billing), plus writing invoices (decisions/0079). */
 export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   admin: Object.values(PERMISSIONS),
-  member: [PERMISSIONS.documentsRead, PERMISSIONS.documentsWrite],
+  member: [PERMISSIONS.documentsRead, PERMISSIONS.documentsWrite, PERMISSIONS.invoicesManage],
 };
 
 export function permissionsForRole(role: Role): readonly Permission[] {

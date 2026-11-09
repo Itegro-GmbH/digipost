@@ -323,6 +323,7 @@
       "matching": "Zuordnung",
       "openItems": "Offene Posten",
       "closing": "Abschluss",
+      "invoices": "Rechnungen",
       "contacts": "Kontakte",
       "team": "Team",
       "companySettings": "Firmendaten",
@@ -336,6 +337,7 @@
       "errors": {
         "invalid_input": "Die ausgewählte Firma ist ungültig.",
         "already_in_workspace": "Sie gehören diesem Arbeitsbereich bereits an.",
+        "invoices_not_archived": "Bitte bestätigen Sie, dass Sie alle Rechnungen heruntergeladen haben.",
         "unauthenticated": "Bitte melden Sie sich erneut an.",
         "no_workspace": "Sie gehören zu keinem Arbeitsbereich.",
         "forbidden": "Dafür fehlt Ihnen die Berechtigung.",
@@ -379,6 +381,7 @@
     "errors": {
       "invalid_input": "Bitte geben Sie einen Firmennamen ein (bis zu 120 Zeichen).",
       "already_in_workspace": "Sie gehören diesem Arbeitsbereich bereits an.",
+      "invoices_not_archived": "Bitte bestätigen Sie, dass Sie alle Rechnungen heruntergeladen haben.",
       "unauthenticated": "Bitte melden Sie sich erneut an.",
       "no_workspace": "Sie gehören zu keinem Arbeitsbereich.",
       "forbidden": "Dafür fehlt Ihnen die Berechtigung.",
@@ -414,6 +417,7 @@
       "confirmation_mismatch": "Die eingegebene Bestätigung stimmt nicht überein.",
       "cannot_leave_as_admin": "Als Administrator können Sie den Arbeitsbereich nicht verlassen. Löschen Sie ihn stattdessen, oder übertragen Sie zuerst die Administratorrolle.",
       "alias_too_generic": "Dieser Markenname ist zu allgemein (z. B. nur eine Rechtsform wie \"GmbH\") oder zu kurz. Bitte verwenden Sie einen spezifischeren Namen.",
+      "invoices_not_archived": "Bitte bestätigen Sie, dass Sie alle Rechnungen heruntergeladen haben.",
       "unauthenticated": "Bitte melden Sie sich erneut an.",
       "no_workspace": "Sie gehören zu keinem Arbeitsbereich.",
       "forbidden": "Dafür fehlt Ihnen die Berechtigung.",
@@ -719,6 +723,7 @@
       "cannot_leave_as_admin": "Als Administrator können Sie den Arbeitsbereich nicht verlassen. Löschen Sie ihn stattdessen, oder übertragen Sie zuerst die Administratorrolle.",
       "alias_too_generic": "Dieser Markenname ist zu allgemein (z. B. nur eine Rechtsform wie \"GmbH\") oder zu kurz. Bitte verwenden Sie einen spezifischeren Namen.",
       "forbidden": "Dafür fehlt Ihnen die Berechtigung.",
+      "invoices_not_archived": "Bitte bestätigen Sie, dass Sie alle Rechnungen heruntergeladen haben.",
       "unauthenticated": "Bitte melden Sie sich erneut an.",
       "no_workspace": "Sie gehören zu keinem Arbeitsbereich.",
       "unknown": "Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut."
@@ -1009,10 +1014,13 @@
     },
     "dangerZone": {
       "heading": "Gefahrenzone",
-      "description": "Das Löschen des Arbeitsbereichs entfernt unwiderruflich alle Dokumente, Kontakte, Konten, Transaktionen und Teammitglieder.",
+      "description": "Das Löschen des Arbeitsbereichs entfernt unwiderruflich alle Dokumente, Rechnungen, Kontakte, Konten, Transaktionen und Teammitglieder.",
       "start": "Arbeitsbereich löschen",
       "confirmPrompt": "Geben Sie zur Bestätigung den Namen des Arbeitsbereichs ein:",
       "confirmLabel": "Name des Arbeitsbereichs",
+      "invoicesNotice": "In diesem Arbeitsbereich {count, plural, one {wurde # Rechnung} other {wurden # Rechnungen}} ausgestellt. Rechnungen müssen 8 Jahre aufbewahrt werden (§ 147 AO). Mit dem Arbeitsbereich werden sie in Digipost gelöscht, die Aufbewahrung liegt dann bei Ihnen.",
+      "invoicesDownload": "Alle Rechnungen herunterladen (ZIP mit PDF und XML)",
+      "invoicesConfirm": "Ich habe {count, plural, one {die Rechnung} other {alle # Rechnungen}} heruntergeladen und bewahre sie selbst auf.",
       "submit": "Endgültig löschen",
       "submitPending": "Wird gelöscht…",
       "cancel": "Abbrechen",
@@ -1029,6 +1037,7 @@
         "confirmation_mismatch": "Der eingegebene Name stimmt nicht mit dem Namen des Arbeitsbereichs überein.",
         "cannot_leave_as_admin": "Als Administrator können Sie den Arbeitsbereich nicht verlassen. Löschen Sie ihn stattdessen.",
         "alias_too_generic": "Dieser Markenname ist zu allgemein (z. B. nur eine Rechtsform wie \"GmbH\") oder zu kurz. Bitte verwenden Sie einen spezifischeren Namen.",
+        "invoices_not_archived": "Bitte bestätigen Sie, dass Sie alle Rechnungen heruntergeladen haben.",
         "unauthenticated": "Bitte melden Sie sich erneut an.",
         "no_workspace": "Sie gehören zu keinem Arbeitsbereich.",
         "forbidden": "Dafür fehlt Ihnen die Berechtigung.",
@@ -1613,5 +1622,191 @@
     "failed": "Das hat nicht geklappt. Bitte versuchen Sie es erneut.",
     "invalidRequest": "Diese Anfrage ist ungültig oder abgelaufen. Bitte starten Sie die Verbindung in Ihrer KI-Anwendung erneut.",
     "revokeHint": "Sie können die Verbindung jederzeit unter Verwaltung > KI-Verbindungen trennen."
+  },
+  "Invoicing": {
+    "heading": "Rechnungen",
+    "description": "Schreiben Sie Rechnungen als E-Rechnung (ZUGFeRD). Festgeschriebene Rechnungen können nicht mehr geändert, nur noch storniert werden.",
+    "list": {
+      "new": "Neue Rechnung",
+      "newPending": "Wird angelegt…",
+      "downloadAll": "Alle herunterladen (ZIP)",
+      "draftsHeading": "Entwürfe",
+      "draftsDescription": "Entwürfe haben noch keine Rechnungsnummer und können frei geändert oder gelöscht werden.",
+      "draftWithoutBuyer": "Entwurf ohne Kunde",
+      "noTotal": "Betrag noch offen",
+      "lineCount": "{count, plural, one {# Position} other {# Positionen}}",
+      "editedAt": "bearbeitet {date}",
+      "issuedHeading": "Ausgestellte Rechnungen",
+      "issuedDescription": "Fortlaufend nummeriert, unveränderlich gespeichert.",
+      "empty": "Noch keine Rechnung ausgestellt.",
+      "columns": {
+        "number": "Nr.",
+        "date": "Datum",
+        "buyer": "Kunde",
+        "amount": "Betrag (brutto)",
+        "status": "Status"
+      }
+    },
+    "status": {
+      "issued": "Ausgestellt",
+      "cancelledBy": "Storniert durch {number}",
+      "cancellationOf": "Storno zu {number}"
+    },
+    "seller": {
+      "missingHeading": "In den Firmendaten fehlen noch Angaben, die auf jeder Rechnung stehen müssen:",
+      "missing": {
+        "address": "Straße und Hausnummer",
+        "postal_code": "Postleitzahl",
+        "city": "Ort",
+        "tax_id": "USt-IdNr. oder Steuernummer"
+      },
+      "editProfile": "Firmendaten ergänzen",
+      "askAdmin": "Bitte bitten Sie die Administration, die Firmendaten zu ergänzen."
+    },
+    "editor": {
+      "heading": "Rechnung schreiben",
+      "description": "Rechnungssteller: {seller}. Rechnungsdatum und Nummer werden beim Festschreiben vergeben.",
+      "delete": "Entwurf löschen",
+      "deleteConfirm": "Diesen Entwurf wirklich löschen?",
+      "buyer": {
+        "heading": "Kunde",
+        "pickContact": "Aus Kontakten übernehmen",
+        "noContact": "Kein Kontakt (frei eingeben)",
+        "name": "Name / Firma",
+        "vatId": "USt-IdNr. des Kunden",
+        "addressLine1": "Straße und Hausnummer",
+        "addressLine2": "Adresszusatz",
+        "postalCode": "Postleitzahl",
+        "city": "Ort",
+        "country": "Land (ISO-Code, z. B. DE)",
+        "email": "E-Mail",
+        "orderReference": "Bestellnummer des Kunden",
+        "buyerReference": "Referenz des Kunden"
+      },
+      "lines": {
+        "heading": "Positionen",
+        "position": "Position {number}",
+        "name": "Bezeichnung",
+        "description": "Beschreibung",
+        "quantity": "Menge",
+        "unit": "Einheit",
+        "unitPrice": "Einzelpreis netto (EUR)",
+        "vatRate": "USt.",
+        "remove": "Entfernen",
+        "add": "Position hinzufügen"
+      },
+      "units": {
+        "C62": "Stück",
+        "HUR": "Stunde",
+        "DAY": "Tag",
+        "MON": "Monat",
+        "LS": "Pauschale",
+        "KGM": "Kilogramm",
+        "MTR": "Meter"
+      },
+      "vatRates": {
+        "19": "19 %",
+        "7": "7 %",
+        "0": "0 %"
+      },
+      "terms": {
+        "heading": "Leistung und Zahlung",
+        "deliveryDate": "Leistungsdatum",
+        "periodStart": "Leistungszeitraum von",
+        "periodEnd": "bis",
+        "paymentTermDays": "Zahlungsziel in Tagen",
+        "paymentIban": "Bankverbindung",
+        "noIban": "Keine Überweisung",
+        "taxExemption": "Grund für 0 % USt.",
+        "chooseExemption": "Bitte wählen",
+        "noExemption": "Keiner (nur bei 0 %-Positionen nötig)",
+        "exemptionReason": "Begründung der Steuerbefreiung",
+        "notes": "Hinweise auf der Rechnung"
+      },
+      "exemptions": {
+        "small_business": "Kleinunternehmer (§ 19 UStG)",
+        "reverse_charge": "Steuerschuldnerschaft des Leistungsempfängers (Reverse Charge)",
+        "exempt": "Steuerfrei (mit Begründung)"
+      },
+      "check": {
+        "heading": "Prüfung",
+        "net": "Netto",
+        "vat": "Umsatzsteuer",
+        "gross": "Gesamt",
+        "unsaved": "Ungespeicherte Änderungen. Speichern Sie, um die Rechnung erneut zu prüfen.",
+        "valid": "Die Rechnung ist vollständig und kann festgeschrieben werden."
+      },
+      "save": "Speichern und prüfen",
+      "preview": "Vorschau (PDF)",
+      "previewNeedsSave": "Bitte speichern Sie zuerst, die Vorschau zeigt den gespeicherten Stand.",
+      "finalize": "Festschreiben",
+      "finalizeBlocked": "Bitte beheben Sie zuerst die oben genannten Punkte.",
+      "finalizeConfirmHeading": "Rechnung jetzt festschreiben?",
+      "finalizeConfirmText": "Die Rechnung erhält das heutige Datum und die nächste Rechnungsnummer. Danach kann sie nicht mehr geändert oder gelöscht werden, nur noch vollständig storniert.",
+      "finalizeConfirm": "Ja, festschreiben",
+      "finalizePending": "Wird festgeschrieben…",
+      "cancel": "Abbrechen"
+    },
+    "violations": {
+      "lines": "Die Rechnung braucht mindestens eine Position.",
+      "line_name": "Position {line}: Bitte geben Sie eine Bezeichnung ein.",
+      "line_quantity": "Position {line}: Bitte prüfen Sie Menge und Einheit.",
+      "line_price": "Position {line}: Bitte prüfen Sie den Einzelpreis.",
+      "line_vat": "Position {line}: Bitte prüfen Sie den Umsatzsteuersatz.",
+      "line_other": "Position {line}: Bitte prüfen Sie die Angaben.",
+      "buyer_name": "Bitte geben Sie den Namen des Kunden ein.",
+      "buyer_address": "Bitte prüfen Sie die Adresse des Kunden.",
+      "buyer_vat_id": "Bitte geben Sie die USt-IdNr. des Kunden an (nötig bei Reverse Charge).",
+      "buyer_email": "Bitte prüfen Sie die E-Mail-Adresse des Kunden.",
+      "seller": "Bitte prüfen Sie die Firmendaten.",
+      "payment": "Bitte prüfen Sie die Bankverbindung.",
+      "delivery": "Bitte prüfen Sie Leistungsdatum oder Leistungszeitraum.",
+      "tax_exemption": "Für Positionen mit 0 % USt. wählen Sie bitte den Grund der Steuerbefreiung.",
+      "exemption_reason": "Bitte begründen Sie die Steuerbefreiung.",
+      "other": "Bitte prüfen Sie die Angaben der Rechnung."
+    },
+    "detail": {
+      "headingInvoice": "Rechnung {number}",
+      "headingCancellation": "Stornorechnung {number}",
+      "downloadPdf": "PDF herunterladen",
+      "downloadXml": "XML herunterladen",
+      "cancel": "Stornieren",
+      "cancelConfirmHeading": "Rechnung {number} vollständig stornieren?",
+      "cancelConfirmText": "Es wird eine Stornorechnung mit eigener Nummer und negativen Beträgen ausgestellt. Die ursprüngliche Rechnung bleibt unverändert erhalten. Das lässt sich nicht rückgängig machen.",
+      "cancelConfirm": "Ja, stornieren",
+      "cancelPending": "Wird storniert…",
+      "cancelAbort": "Abbrechen",
+      "pdfTitle": "Rechnung {number} als PDF",
+      "facts": "Angaben",
+      "buyer": "Kunde",
+      "issueDate": "Rechnungsdatum",
+      "dueDate": "Fällig am",
+      "net": "Netto",
+      "vat": "Umsatzsteuer",
+      "gross": "Gesamt",
+      "openDocument": "Im Posteingang ansehen",
+      "history": "Verlauf",
+      "events": {
+        "issued": "Ausgestellt von {actor} am {date}",
+        "cancelled": "Storniert von {actor} am {date}"
+      },
+      "unknownActor": "unbekannt",
+      "integrity": "Prüfsumme der PDF (SHA-256): {hash}",
+      "immutable": "Diese Rechnung ist festgeschrieben und kann nicht mehr geändert oder gelöscht werden."
+    },
+    "errors": {
+      "invalid_input": "Die Eingaben sind unvollständig oder ungültig.",
+      "not_found": "Dieser Entwurf oder diese Rechnung existiert nicht (mehr).",
+      "company_profile_incomplete": "In den Firmendaten fehlen Pflichtangaben für Rechnungen.",
+      "invoice_invalid": "Die Rechnung ist noch nicht vollständig. Bitte prüfen Sie die markierten Punkte.",
+      "already_cancelled": "Diese Rechnung wurde bereits storniert.",
+      "not_cancellable": "Eine Stornorechnung kann nicht erneut storniert werden.",
+      "quota_total_exceeded": "Ihr Dokumentenkontingent ist ausgeschöpft. Jede Rechnung wird auch als Dokument gespeichert.",
+      "quota_monthly_exceeded": "Ihr monatliches Dokumentenkontingent ist ausgeschöpft. Jede Rechnung wird auch als Dokument gespeichert.",
+      "unauthenticated": "Bitte melden Sie sich erneut an.",
+      "no_workspace": "Sie gehören zu keinem Arbeitsbereich.",
+      "forbidden": "Dafür fehlt Ihnen die Berechtigung.",
+      "unknown": "Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut."
+    }
   }
 }

@@ -10,7 +10,7 @@ Maintenance triggers:
 - A second locale is added (this owner then also adds locale routing, per
   WEBAPP_TEMPLATE_SPEC.md §2.5)
 - A new top-level message namespace is introduced
-Last verified: 2026-10-22, decisions/0075-email-intake.md added the `MailIntake` namespace and
+Last verified: 2026-11-05, decisions/0079-outgoing-invoices.md added the `Invoicing` namespace, `DashboardShell.nav.invoices`, the danger zone's invoice confirmation and the `invoices_not_archived` workspace error code. Previously 2026-10-22, decisions/0075-email-intake.md added the `MailIntake` namespace and
 `DocumentDetail.receivedByEmailFrom`. Previously 2026-09-20, F1b added the `DocumentKinds`, `SettlementPlatforms`,
 `SemanticFields`, and `IntakeSettings` namespaces (decisions/0022-intake-wiring.md), plus
 intake-related keys under the existing `DocumentDetail`, `Inbox`, `Scan`, and

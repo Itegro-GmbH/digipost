@@ -65,6 +65,9 @@ export const NAV_SECTIONS: readonly NavSection[] = [
   // checks a period for completeness and exports it for the tax advisor. A standalone entry
   // rather than a section, because the check and the export are one workflow, not two rooms.
   { labelKey: null, items: [{ href: "/dashboard/abschluss", labelKey: "closing", permission: "finance.read" }] },
+  // decisions/0079-outgoing-invoices.md: writing invoices is everyday work for every member,
+  // a standalone entry rather than part of the admin-only "Finanzen".
+  { labelKey: null, items: [{ href: "/dashboard/invoices", labelKey: "invoices", permission: "invoices.manage" }] },
   { labelKey: null, items: [{ href: "/dashboard/contacts", labelKey: "contacts" }] },
   {
     labelKey: "sections.admin",

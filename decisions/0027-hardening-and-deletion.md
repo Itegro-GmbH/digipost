@@ -110,7 +110,12 @@ Extended by decisions/0075-email-intake.md: `mail_intake_settings`, `mail_intake
 and `inbound_emails` (all `workspace_id uuid not null ... on delete cascade`) joined this list and
 that test. Extended by decisions/0077-arbiter-answer-cache.md: `payment_arbiter_answers`
 (`workspace_id uuid not null ... on delete cascade`, and `transaction_id` cascading from
-`transactions` as well) joined this list and that test.
+`transactions` as well) joined this list and that test. Extended by decisions/0079-outgoing-invoices.md:
+`invoice_drafts`, `invoice_number_sequences`, `invoices` and `invoice_events` (all `workspace_id
+uuid not null ... on delete cascade`) joined this list and that test. `invoices` and
+`invoice_events` are append-only (a trigger refuses every UPDATE/DELETE); this cascade is the one
+DELETE that trigger lets through, and `WorkspaceUseCases.deleteWorkspace` requires the admin's
+confirmation that every issued invoice was downloaded before it runs.
 
 **Storage cleanup: synchronous best-effort plus a durable retry job.** `ObjectStorage` gained
 `listObjects(prefix)` and `deleteObjects(keys)` (paginated `ListObjectsV2`/batched
