@@ -156,6 +156,7 @@ export function createDrizzleLedgerRepository(db: DbExecutor): LedgerRepository 
       if (filter.to) conditions.push(lte(journalEntries.bookingDate, filter.to));
       if (filter.status) conditions.push(eq(journalEntries.status, filter.status));
       if (filter.origin) conditions.push(eq(journalEntries.origin, filter.origin));
+      if (filter.documentId) conditions.push(eq(journalEntries.documentId, filter.documentId));
       if (filter.dismissed === "exclude") conditions.push(isNull(journalEntries.dismissedAt));
       if (filter.dismissed === "only") conditions.push(isNotNull(journalEntries.dismissedAt));
       if (filter.accountId) {

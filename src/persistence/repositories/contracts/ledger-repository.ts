@@ -133,6 +133,8 @@ export type JournalEntryFilter = {
   status?: JournalEntryStatus;
   origin?: JournalEntryOrigin;
   accountId?: string;
+  /** Entries whose source document is this one. */
+  documentId?: string;
   changedSince?: Date;
   dismissed: "exclude" | "include" | "only";
   limit: number;

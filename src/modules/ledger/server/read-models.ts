@@ -6,7 +6,8 @@ import { getRequestServices } from "@/persistence/composition/request-services";
 import type { AdvisorComparisonView } from "@/persistence/use-cases/ledger-use-cases";
 
 import type { AccountSheet, BalanceList, OpenItems, Period, VatPreview } from "../core/reports";
-import type { ControlResult } from "../core/controls";
+import type { BankBalanceComparison, ControlResult } from "../core/controls";
+import { ledgerDocumentStatusOf } from "../core/document-status";
 import type { ListEntriesFilter } from "../core/schemas";
 import type {
   AdvisorUploadView,
@@ -16,6 +17,7 @@ import type {
   JournalEntryListItem,
   JournalEntryView,
   LedgerAccountView,
+  LedgerDocumentStatus,
   LedgerSettingsView,
   LedgerSourcesView,
   MatchSuggestion,
@@ -64,8 +66,34 @@ export const getLedgerBalancesProjection = cache(async (workspaceId: string, fro
   return getRequestServices().ledger.getBalances(workspaceId, { from, to });
 });
 
-export const getLedgerAccountSheetProjection = cache(async (workspaceId: string, accountNumber: string, from: string, to: string): Promise<AccountSheet | null> => {
-  return getRequestServices().ledger.getAccountSheet(workspaceId, { accountNumber, from, to });
+/** Proposals are listed; they count toward the balance only with `countProposals`. */
+export const getLedgerAccountSheetProjection = cache(
+  async (workspaceId: string, accountNumber: string, from: string, to: string, countProposals = false): Promise<AccountSheet | null> => {
+    return getRequestServices().ledger.getAccountSheet(workspaceId, { accountNumber, from, to, countProposals });
+  },
+);
+
+/** Booked-only sheets of several accounts in one read; `cache()` compares the array by reference. */
+export const getLedgerAccountSheetsProjection = cache(async (workspaceId: string, accountNumbers: readonly string[], from: string, to: string): Promise<AccountSheet[]> => {
+  return getRequestServices().ledger.getAccountSheets(workspaceId, { accountNumbers, from, to });
+});
+
+/** Per bank ledger account: matches the real bank balance up to `to`, or from which day it does not. */
+export const getLedgerBankComparisonsProjection = cache(async (workspaceId: string, from: string, to: string): Promise<BankBalanceComparison[]> => {
+  return getRequestServices().ledger.getBankComparisons(workspaceId, { from, to });
+});
+
+/**
+ * The ledger's status of one document for the document page (decisions/0080 UI): `null` while
+ * the ledger is off. The caller checks `finance.read` first (an entry's accounts and amounts are
+ * finance information); `documentId` is the page's own document, already found in the caller's
+ * workspace, and is only matched against that workspace's entries.
+ */
+export const getLedgerDocumentStatusProjection = cache(async (workspaceId: string, documentId: string): Promise<LedgerDocumentStatus | null> => {
+  const ledger = getRequestServices().ledger;
+  if (!(await ledger.isEnabled(workspaceId))) return null;
+  const [entries, filings] = await Promise.all([ledger.listEntries(workspaceId, { documentId, dismissed: "include", limit: 20 }), ledger.listFilings(workspaceId)]);
+  return ledgerDocumentStatusOf(entries, filings);
 });
 
 export const getLedgerOpenItemsProjection = cache(

@@ -27,6 +27,7 @@
 // open-item account that book and pay the same document and sum to zero; anything else is only
 // suggested (`suggestMatches`).
 import {
+  type BankBalanceComparison,
   adviceQuestionsFor,
   BANK_ACCOUNT_NUMBERS,
   bookingAdviceCacheKey,
@@ -209,7 +210,15 @@ export interface LedgerUseCases {
 
   // Reports
   getBalances(workspaceId: string, period: Period): Promise<BalanceList>;
-  getAccountSheet(workspaceId: string, input: { accountNumber: string; from: string; to: string }): Promise<AccountSheet | null>;
+  /** The Kontenblatt. Proposals are listed (dashed in the UI) and count toward the balance only
+   * with `countProposals` ("Vorschläge einrechnen"). */
+  getAccountSheet(workspaceId: string, input: { accountNumber: string; from: string; to: string; countProposals?: boolean }): Promise<AccountSheet | null>;
+  /** Booked-only account sheets of several accounts in one read (the advisor comparison's
+   * differing rows). Unknown numbers are left out. */
+  getAccountSheets(workspaceId: string, input: { accountNumbers: readonly string[]; from: string; to: string }): Promise<AccountSheet[]>;
+  /** Per bank ledger account: does it match the real bank balance on every day up to `period.to`,
+   * and from which day on does it not (the "Konten" page's chips). */
+  getBankComparisons(workspaceId: string, period: Period): Promise<BankBalanceComparison[]>;
   getOpenItems(workspaceId: string, input: { accountNumber: string; asOf: string }): Promise<(OpenItems & { account: LedgerAccountView }) | null>;
   listOpenItemAccounts(workspaceId: string, asOf: string): Promise<OpenItemAccountSummary[]>;
   getVatPreview(workspaceId: string, period: Period): Promise<VatPreview>;
@@ -320,6 +329,7 @@ function toReportLine(row: LedgerReportLineRow): ReportLine {
     entryText: row.entryText,
     documentId: row.documentId,
     transactionId: row.transactionId,
+    ...(row.status === "proposed" ? { proposed: true } : {}),
   };
 }
 
@@ -653,9 +663,9 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
     ).differenceCount;
   }
 
-  async function controlsFor(workspaceId: string, ctx: ControlContext, period: Period): Promise<{ controls: ControlResult[]; booked: number; proposed: number }> {
+  function bankComparisonsFor(ctx: ControlContext, period: Period): BankBalanceComparison[] {
     const lines = ctx.lines.filter((line) => line.bookingDate <= period.to);
-    const bank = ctx.accounts
+    return ctx.accounts
       .filter((account) => account.ownerType === "bank_account" && account.ownerBankAccountId)
       .map((account) =>
         compareBankBalances(
@@ -672,6 +682,11 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
           period,
         ),
       );
+  }
+
+  async function controlsFor(workspaceId: string, ctx: ControlContext, period: Period): Promise<{ controls: ControlResult[]; booked: number; proposed: number }> {
+    const lines = ctx.lines.filter((line) => line.bookingDate <= period.to);
+    const bank = bankComparisonsFor(ctx, period);
 
     const covered = clampToStart(period, ctx.settings.startDate);
     const [unbookedTx, unbookedDocs, counts, advisor] = await Promise.all([
@@ -1064,6 +1079,7 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
         status: parsed.status,
         origin: parsed.origin,
         accountId,
+        documentId: parsed.documentId,
         changedSince: parsed.changedSince ? new Date(parsed.changedSince) : undefined,
         dismissed: parsed.dismissed,
         limit: parsed.limit,
@@ -1370,17 +1386,42 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
       return computeBalances(reportAccounts, lines, period);
     },
 
-    async getAccountSheet(workspaceId, { accountNumber, from, to }) {
+    async getAccountSheet(workspaceId, { accountNumber, from, to, countProposals = false }) {
       await requireEnabled(workspaceId);
-      const { accounts, lines } = await loadReport(workspaceId, to);
+      const [accounts, rows] = await Promise.all([ledger.listAccounts(workspaceId), ledger.listReportLines(workspaceId, { to, statuses: ["booked", "proposed"] })]);
       const account = accounts.find((candidate) => candidate.number === accountNumber);
       if (!account) return null;
+      const lines = rows.map(toReportLine);
       const entries = new Set(lines.filter((line) => line.accountId === account.id).map((line) => line.entryId));
       return computeAccountSheet(
         toReportAccount(account),
         lines.filter((line) => entries.has(line.entryId)),
         { from, to },
+        { countProposals },
       );
+    },
+
+    async getAccountSheets(workspaceId, { accountNumbers, from, to }) {
+      await requireEnabled(workspaceId);
+      const wanted = new Set(accountNumbers);
+      if (wanted.size === 0) return [];
+      const { accounts, lines } = await loadReport(workspaceId, to);
+      return accounts
+        .filter((account) => wanted.has(account.number))
+        .map((account) => {
+          const entries = new Set(lines.filter((line) => line.accountId === account.id).map((line) => line.entryId));
+          return computeAccountSheet(
+            toReportAccount(account),
+            lines.filter((line) => entries.has(line.entryId)),
+            { from, to },
+          );
+        });
+    },
+
+    async getBankComparisons(workspaceId, period) {
+      const settings = await requireEnabled(workspaceId);
+      const ctx = await loadControlContext(workspaceId, settings, period.to);
+      return bankComparisonsFor(ctx, period);
     },
 
     async getOpenItems(workspaceId, { accountNumber, asOf }) {

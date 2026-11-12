@@ -1,7 +1,8 @@
 // How the UI names a period ("Juli 2026", "3. Quartal 2026", "2026") and which submitted filing
 // locks a date (decisions/0080 "Locked when filed"). Pure; the use case and the database stay the
 // authority on the lock itself, this only labels it.
-import type { FilingView } from "./types";
+import { vatPeriodsOfYear, type LabeledPeriod } from "./controls";
+import type { FilingView, VatPeriod } from "./types";
 
 export type PeriodShape =
   | { kind: "month"; year: number; month: number }
@@ -52,4 +53,18 @@ export function firstOpenDate(filings: readonly FilingView[], date: string): str
     current = next.toISOString().slice(0, 10);
   }
   return current;
+}
+
+/** Every USt-VA period that has started by `today` and does not end before the ledger's start
+ * date, newest first (the period selects of "USt-VA" and "Zeiträume"). */
+export function startedVatPeriods(settings: { vatPeriod: VatPeriod; startDate: string | null }, today: string): LabeledPeriod[] {
+  const startYear = Number((settings.startDate ?? today).slice(0, 4));
+  const currentYear = Number(today.slice(0, 4));
+  const out: LabeledPeriod[] = [];
+  for (let year = currentYear; year >= startYear; year -= 1) {
+    for (const period of vatPeriodsOfYear(year, settings.vatPeriod).reverse()) {
+      if (period.from <= today && (!settings.startDate || period.to >= settings.startDate)) out.push(period);
+    }
+  }
+  return out;
 }

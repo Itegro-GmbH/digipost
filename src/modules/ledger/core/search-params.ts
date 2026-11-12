@@ -104,3 +104,53 @@ export function journalSearch(values: JournalFilterValues, overrides: Partial<Jo
   const text = query.toString();
   return text ? `?${text}` : "";
 }
+
+// -- Konten (Summen- und Saldenliste) and Kontenblatt --------------------------------------
+
+/** "Einfach" (rein/raus, plain language) or "Soll/Haben" (EB, Soll, Haben, Saldo). */
+export const BALANCE_VIEW_MODES = ["einfach", "soll-haben"] as const;
+export type BalanceViewMode = (typeof BALANCE_VIEW_MODES)[number];
+
+export type AccountsFilterValues = { von: string; bis: string; ansicht: BalanceViewMode; alle: boolean };
+
+/** `?von=&bis=&ansicht=&alle=1` of `/dashboard/buchhaltung/konten`; the period defaults to the
+ * calendar year of `today` (from its first day to today). */
+export function parseAccountsSearchParams(params: RawSearchParams, today: string): AccountsFilterValues {
+  const [von, bis] = ordered(isoDateParam(first(params, "von")), isoDateParam(first(params, "bis")));
+  const ansicht = first(params, "ansicht");
+  return {
+    von: von || `${today.slice(0, 4)}-01-01`,
+    bis: bis || (von && von > today ? `${von.slice(0, 4)}-12-31` : today),
+    ansicht: (BALANCE_VIEW_MODES as readonly string[]).includes(ansicht) ? (ansicht as BalanceViewMode) : "einfach",
+    alle: first(params, "alle") === "1",
+  };
+}
+
+/** The search string of the accounts page with `overrides`; defaults are left out except the
+ * period, which every link carries. */
+export function accountsSearch(values: AccountsFilterValues, overrides: Partial<AccountsFilterValues> = {}): string {
+  const merged = { ...values, ...overrides };
+  const query = new URLSearchParams({ von: merged.von, bis: merged.bis });
+  if (merged.ansicht !== "einfach") query.set("ansicht", merged.ansicht);
+  if (merged.alle) query.set("alle", "1");
+  return `?${query.toString()}`;
+}
+
+export const ACCOUNT_SHEET_TABS = ["blatt", "offen"] as const;
+export type AccountSheetTab = (typeof ACCOUNT_SHEET_TABS)[number];
+
+export type AccountSheetFilterValues = { von: string; bis: string; vorschlaege: boolean; tab: AccountSheetTab };
+
+/** `?von=&bis=&vorschlaege=1&tab=offen` of `/dashboard/buchhaltung/konten/[nummer]`. */
+export function parseAccountSheetSearchParams(params: RawSearchParams, today: string): AccountSheetFilterValues {
+  const period = parseAccountsSearchParams(params, today);
+  return { von: period.von, bis: period.bis, vorschlaege: first(params, "vorschlaege") === "1", tab: first(params, "tab") === "offen" ? "offen" : "blatt" };
+}
+
+export function accountSheetSearch(values: AccountSheetFilterValues, overrides: Partial<AccountSheetFilterValues> = {}): string {
+  const merged = { ...values, ...overrides };
+  const query = new URLSearchParams({ von: merged.von, bis: merged.bis });
+  if (merged.vorschlaege) query.set("vorschlaege", "1");
+  if (merged.tab !== "blatt") query.set("tab", merged.tab);
+  return `?${query.toString()}`;
+}

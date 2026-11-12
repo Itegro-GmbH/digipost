@@ -40,6 +40,7 @@ export {
   computeBalances,
   computeOpenItems,
   computeVatPreview,
+  vatKennzahlenOfEntry,
   type AccountSheet,
   type AccountSheetRow,
   type BalanceList,
@@ -83,6 +84,16 @@ export {
 } from "./core/advisor";
 export { summarizeEntry, type SummaryLine } from "./core/summary";
 export {
+  ACCOUNT_SHEET_TABS,
+  accountSheetSearch,
+  accountsSearch,
+  BALANCE_VIEW_MODES,
+  parseAccountSheetSearchParams,
+  parseAccountsSearchParams,
+  type AccountSheetFilterValues,
+  type AccountSheetTab,
+  type AccountsFilterValues,
+  type BalanceViewMode,
   isoDateParam,
   isQueueFiltered,
   JOURNAL_MAX_LIMIT,
@@ -97,7 +108,18 @@ export {
   type QueueFilterValues,
   type RawSearchParams,
 } from "./core/search-params";
-export { describePeriod, firstOpenDate, lockingFilingFor, type PeriodShape } from "./core/periods";
+export {
+  buildBalanceGroups,
+  isCreditNormal,
+  OPEN_ITEM_ACCOUNT_TYPES,
+  openItemAccountType,
+  type OpenItemAccountType,
+  type AccountStatusChip,
+  type BalanceViewGroup,
+  type BalanceViewRow,
+} from "./core/balance-view";
+export { ledgerDocumentStatusOf } from "./core/document-status";
+export { describePeriod, firstOpenDate, lockingFilingFor, startedVatPeriods, type PeriodShape } from "./core/periods";
 export type {
   AdviceAccount,
   AdviceTaxBreakdownEntry,

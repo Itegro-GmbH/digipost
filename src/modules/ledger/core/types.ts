@@ -393,3 +393,23 @@ export type LedgerSourceTransaction = {
 
 /** `getSources`: what was found; a missing id (deleted, or of another workspace) is absent. */
 export type LedgerSourcesView = { documents: LedgerSourceDocument[]; transactions: LedgerSourceTransaction[] };
+
+/** One entry of a document as the document page's "Buchhaltung" card shows it. */
+export type LedgerDocumentEntry = {
+  id: string;
+  status: JournalEntryStatus;
+  dismissed: boolean;
+  bookingDate: string;
+  totalCents: number;
+  summary: MessageRef;
+  /** The submitted filing that freezes the entry, if any. */
+  lockedBy: FilingRef | null;
+};
+
+/** The ledger's view of one document (`getLedgerDocumentStatusProjection`): `null` while the
+ * ledger is off. `state` is the strongest of its entries: locked, booked, proposed, or none (no
+ * entry, or only dismissed proposals). */
+export type LedgerDocumentStatus = {
+  state: "locked" | "booked" | "proposed" | "none";
+  entries: LedgerDocumentEntry[];
+};

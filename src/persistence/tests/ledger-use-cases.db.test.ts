@@ -441,3 +441,40 @@ describe("ledger booking rules", () => {
     expect(await code(ledger.deleteRule({ workspaceId, ruleId: rule.id }))).toBe("not_found");
   });
 });
+
+describe("ledger reads of the second UI stage (accounts page, Kontenblatt, document card)", () => {
+  it("lists proposals on the account sheet, counted only on request; compares each bank account; finds a document's entries", async () => {
+    const { workspaceId, bankAccountId } = await enabledWorkspace();
+    const capital = await bankTransaction(workspaceId, bankAccountId, "2026-06-10", 1250100, "Gesellschafter");
+    await bankTransaction(workspaceId, bankAccountId, "2026-07-01", -150, "IONOS");
+    const doc = await invoiceDocument(workspaceId, "2026-07-01", "IONOS Rechnung");
+    await ledger.createEntry({ workspaceId, userId: USER, entry: { bookingDate: "2026-06-10", text: "Stammkapital", transactionId: capital.id, lines: [{ accountNumber: "1800", amountCents: 1250100 }, { accountNumber: "2900", amountCents: -1250100 }] }, book: true });
+    const proposal = await ledger.createEntry({ workspaceId, userId: USER, entry: ionos({ documentId: doc.id }), book: false });
+
+    const booked = await ledger.getAccountSheet(workspaceId, { accountNumber: "1800", from: "2026-06-01", to: "2026-07-31" });
+    expect(booked?.rows.map((row) => [row.proposed, row.runningBalanceCents])).toEqual([
+      [false, 1250100],
+      [true, 1250100],
+    ]);
+    expect(booked?.closingCents).toBe(1250100);
+    const counted = await ledger.getAccountSheet(workspaceId, { accountNumber: "1800", from: "2026-06-01", to: "2026-07-31", countProposals: true });
+    expect(counted?.closingCents).toBe(1249950);
+
+    // Booked only: the bank diverges from 01.07. until the proposal is booked.
+    const [bank] = await ledger.getBankComparisons(workspaceId, { from: "2026-06-01", to: "2026-07-31" });
+    expect(bank).toMatchObject({ accountNumber: "1800", ok: false, firstDivergenceDate: "2026-07-01" });
+    await ledger.bookEntry({ workspaceId, userId: USER, entryId: proposal.entryId });
+    expect((await ledger.getBankComparisons(workspaceId, { from: "2026-06-01", to: "2026-07-31" }))[0]).toMatchObject({ ok: true, firstDivergenceDate: null });
+
+    const sheets = await ledger.getAccountSheets(workspaceId, { accountNumbers: ["2900", "6810", "9999"], from: "2026-06-01", to: "2026-07-31" });
+    expect(sheets.map((sheet) => [sheet.account.number, sheet.closingCents])).toEqual([
+      ["2900", -1250100],
+      ["6810", 126],
+    ]);
+
+    const forDocument = await ledger.listEntries(workspaceId, { documentId: doc.id, dismissed: "include" });
+    expect(forDocument.map((entry) => entry.id)).toEqual([proposal.entryId]);
+    const other = await enabledWorkspace();
+    expect(await ledger.listEntries(other.workspaceId, { documentId: doc.id, dismissed: "include" })).toEqual([]);
+  });
+});

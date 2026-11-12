@@ -143,6 +143,8 @@ export const listEntriesFilterSchema = z.object({
   status: z.enum(JOURNAL_ENTRY_STATUSES).optional(),
   origin: z.enum(JOURNAL_ENTRY_ORIGINS).optional(),
   accountNumber: accountNumberSchema.optional(),
+  /** Only entries whose source is this document (the document page's "Buchhaltung" card). */
+  documentId: z.uuid().optional(),
   /** Only entries with a revision after this moment ("geändert seit Übergabe"). */
   changedSince: z.iso.datetime({ offset: true }).optional(),
   dismissed: z.enum(["exclude", "include", "only"]).default("exclude"),

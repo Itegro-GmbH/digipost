@@ -40,6 +40,9 @@ export type ReportLine = {
   entryText: string;
   documentId: string | null;
   transactionId: string | null;
+  /** The line belongs to a proposal, not a booked entry. Only the account sheet loads
+   * proposals (shown dashed, counted only on request); every other report is booked only. */
+  proposed?: boolean;
 };
 
 export type Period = { from: string; to: string };
@@ -148,6 +151,8 @@ export type AccountSheetRow = {
   taxRole: TaxRole | null;
   documentId: string | null;
   transactionId: string | null;
+  /** A proposal's line: listed, but in the balance only with `countProposals`. */
+  proposed: boolean;
 };
 
 export type AccountSheet = {
@@ -168,9 +173,11 @@ function compareLines(a: ReportLine, b: ReportLine): number {
 /**
  * The Kontenblatt: every line of one account in the period, oldest first, with the running
  * balance and the accounts on the other side of each entry. `lines` must contain every line of
- * every entry touching the account (the counter accounts come from them).
+ * every entry touching the account (the counter accounts come from them). Lines of proposals
+ * (`proposed`) are listed but leave the balance and the sums alone unless `countProposals`.
  */
-export function computeAccountSheet(account: ReportAccount, lines: readonly ReportLine[], period: Period): AccountSheet {
+export function computeAccountSheet(account: ReportAccount, lines: readonly ReportLine[], period: Period, options: { countProposals?: boolean } = {}): AccountSheet {
+  const counts = (line: ReportLine) => !line.proposed || options.countProposals === true;
   const byEntry = new Map<string, ReportLine[]>();
   for (const line of lines) {
     const list = byEntry.get(line.entryId) ?? [];
@@ -183,7 +190,7 @@ export function computeAccountSheet(account: ReportAccount, lines: readonly Repo
   for (const line of lines) {
     if (line.accountId !== account.id || line.bookingDate > period.to) continue;
     if (line.bookingDate < period.from) {
-      if (countsTowardOpening(account.kind, line.bookingDate, period.from)) opening += line.amountCents;
+      if (counts(line) && countsTowardOpening(account.kind, line.bookingDate, period.from)) opening += line.amountCents;
       continue;
     }
     inPeriod.push(line);
@@ -194,9 +201,11 @@ export function computeAccountSheet(account: ReportAccount, lines: readonly Repo
   let debit = 0;
   let credit = 0;
   const rows = inPeriod.map((line): AccountSheetRow => {
-    running += line.amountCents;
-    if (line.amountCents > 0) debit += line.amountCents;
-    else credit -= line.amountCents;
+    if (counts(line)) {
+      running += line.amountCents;
+      if (line.amountCents > 0) debit += line.amountCents;
+      else credit -= line.amountCents;
+    }
     const others = (byEntry.get(line.entryId) ?? []).filter((other) => other.accountId !== account.id);
     const opposite = others.filter((other) => Math.sign(other.amountCents) === -Math.sign(line.amountCents));
     const counters = [...new Set((opposite.length > 0 ? opposite : others).map((other) => other.accountNumber))];
@@ -212,6 +221,7 @@ export function computeAccountSheet(account: ReportAccount, lines: readonly Repo
       taxRole: line.taxRole,
       documentId: line.documentId,
       transactionId: line.transactionId,
+      proposed: line.proposed === true,
     };
   });
   return { account, openingCents: opening, debitCents: debit, creditCents: credit, closingCents: running, rows };
@@ -295,4 +305,23 @@ export function computeVatPreview(lines: readonly Pick<ReportLine, "accountNumbe
     return { kennzahl, baseCents: hasBase ? (base.get(kennzahl) ?? 0) : null, taxCents: hasTax ? (tax.get(kennzahl) ?? 0) : null };
   });
   return { rows, outputTaxCents: outputTax, inputTaxCents: inputTax, payableCents: payable };
+}
+
+/**
+ * The USt-VA fields one entry contributes to, in `VAT_KENNZAHLEN` order: the base field of each
+ * base line's tax code and the field of each tax account it books. 83 (the Zahllast) is every
+ * entry that touches any tax field, so it is left out. Lets the preview list the entries behind
+ * each Kennzahl with the same rules `computeVatPreview` sums by.
+ */
+export function vatKennzahlenOfEntry(lines: readonly Pick<ReportLine, "accountNumber" | "taxCode" | "taxRole">[]): VatKennzahl[] {
+  const found = new Set<VatKennzahl>();
+  for (const line of lines) {
+    if (line.taxCode && line.taxRole !== "tax") {
+      const kennzahl = TAX_CODE_DEFINITIONS[line.taxCode].baseKennzahl;
+      if (kennzahl) found.add(kennzahl);
+    }
+    const taxAccount = TAX_ACCOUNT_KENNZAHLEN[line.accountNumber];
+    if (taxAccount) found.add(taxAccount.kennzahl);
+  }
+  return VAT_KENNZAHLEN.filter((kennzahl) => kennzahl !== "83" && found.has(kennzahl));
 }
