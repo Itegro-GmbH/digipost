@@ -65,8 +65,46 @@ export function DocumentDetailClient({
     document.totalAmountCents !== null
       ? new Intl.NumberFormat("de-DE", { style: "currency", currency: document.currency ?? "EUR" }).format(document.totalAmountCents / 100)
       : null;
+  // decisions/0080-ledger-double-entry-bookkeeping.md, phase 2: the tax fields, read-only and
+  // compact: one line per printed rate ("Netto 107,88 €, USt 19 % 20,50 €"), the totals only
+  // when they add something (no breakdown, or more than one rate), then reverse charge,
+  // pass-through amounts and the service date or period.
+  const formatMoney = (cents: number) => new Intl.NumberFormat("de-DE", { style: "currency", currency: document.currency ?? "EUR" }).format(cents / 100);
+  const formatRate = (rate: number) => new Intl.NumberFormat("de-DE", { maximumFractionDigits: 2 }).format(rate);
+  const formatDay = (iso: string) => new Intl.DateTimeFormat("de", { dateStyle: "medium" }).format(new Date(iso));
+  const taxLines = (document.taxBreakdown ?? []).map((entry) => {
+    const parts: string[] = [];
+    if (entry.netCents !== null) parts.push(t("invoiceTaxNet", { amount: formatMoney(entry.netCents) }));
+    const rate = formatRate(entry.ratePercent);
+    parts.push(entry.taxCents !== null ? t("invoiceTaxRate", { rate, amount: formatMoney(entry.taxCents) }) : t("invoiceTaxRateOnly", { rate }));
+    return parts.join(", ");
+  });
+  const showTaxTotals = taxLines.length !== 1 && (document.netTotalCents !== null || document.taxTotalCents !== null);
+  const taxTotalsLine = showTaxTotals
+    ? [
+        document.netTotalCents !== null ? t("invoiceTaxNet", { amount: formatMoney(document.netTotalCents) }) : null,
+        document.taxTotalCents !== null ? t("invoiceTaxAmount", { amount: formatMoney(document.taxTotalCents) }) : null,
+      ]
+        .filter((part): part is string => part !== null)
+        .join(", ")
+    : null;
+  const formattedPassThrough = document.passThroughCents !== null ? formatMoney(document.passThroughCents) : null;
+  const formattedServicePeriod =
+    document.servicePeriodFrom && document.servicePeriodTo
+      ? t("invoiceServicePeriodValue", { from: formatDay(document.servicePeriodFrom), to: formatDay(document.servicePeriodTo) })
+      : null;
+  const formattedServiceDate = document.serviceDate ? formatDay(document.serviceDate) : null;
+  const hasTaxFields = Boolean(
+    taxLines.length > 0 || taxTotalsLine || document.reverseCharge || formattedPassThrough || formattedServicePeriod || formattedServiceDate,
+  );
   const hasInvoiceFields = Boolean(
-    document.invoiceNumber || formattedAmount || formattedDueDate || document.paymentIban || document.paymentReference || document.paidNote,
+    document.invoiceNumber ||
+      formattedAmount ||
+      formattedDueDate ||
+      document.paymentIban ||
+      document.paymentReference ||
+      document.paidNote ||
+      hasTaxFields,
   );
   // The self-counterparty guard (H2-wave2.md, decisions/0036-guided-extraction.md's wave 2):
   // a "derived"-mode kind can only ever resolve to `"outgoing"`/`"incoming"` (from the kind
@@ -220,6 +258,53 @@ export function DocumentDetailClient({
                 <dt className="text-muted-foreground">{t("invoicePaidNote")}</dt>
                 <dd className="text-foreground">{document.paidNote}</dd>
               </div>
+            ) : null}
+            {taxLines.length > 0 ? (
+              <div className="flex justify-between gap-2">
+                <dt className="text-muted-foreground">{t("invoiceTax")}</dt>
+                <dd className="text-right text-foreground">
+                  {taxLines.map((line, index) => (
+                    <span key={index} className="block">
+                      {line}
+                    </span>
+                  ))}
+                </dd>
+              </div>
+            ) : null}
+            {taxTotalsLine ? (
+              <div className="flex justify-between gap-2">
+                <dt className="text-muted-foreground">{taxLines.length > 1 ? t("invoiceTaxTotal") : t("invoiceTax")}</dt>
+                <dd className="text-right text-foreground">{taxTotalsLine}</dd>
+              </div>
+            ) : null}
+            {document.reverseCharge ? (
+              <div className="flex justify-between gap-2">
+                <dt className="text-muted-foreground">{t("invoiceReverseCharge")}</dt>
+                <dd className="text-right text-foreground">{t("invoiceReverseChargeHint")}</dd>
+              </div>
+            ) : null}
+            {formattedPassThrough ? (
+              <div className="flex justify-between gap-2">
+                <dt className="text-muted-foreground">{t("invoicePassThrough")}</dt>
+                <dd className="text-foreground">{formattedPassThrough}</dd>
+              </div>
+            ) : null}
+            {formattedServicePeriod ? (
+              <div className="flex justify-between gap-2">
+                <dt className="text-muted-foreground">{t("invoiceServicePeriod")}</dt>
+                <dd className="text-foreground">{formattedServicePeriod}</dd>
+              </div>
+            ) : null}
+            {formattedServiceDate && !formattedServicePeriod ? (
+              <div className="flex justify-between gap-2">
+                <dt className="text-muted-foreground">{t("invoiceServiceDate")}</dt>
+                <dd className="text-foreground">{formattedServiceDate}</dd>
+              </div>
+            ) : null}
+            {document.taxCheck === "inconsistent" ? (
+              <p role="note" className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                {t("invoiceTaxInconsistent")}
+              </p>
             ) : null}
           </dl>
         ) : null}

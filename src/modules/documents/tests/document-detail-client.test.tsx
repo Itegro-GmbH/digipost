@@ -47,6 +47,15 @@ function baseDocument(overrides: Partial<DocumentDetailView>): DocumentDetailVie
     paymentIban: null,
     paymentReference: null,
     paidNote: null,
+    taxBreakdown: null,
+    netTotalCents: null,
+    taxTotalCents: null,
+    passThroughCents: null,
+    reverseCharge: null,
+    serviceDate: null,
+    servicePeriodFrom: null,
+    servicePeriodTo: null,
+    taxCheck: null,
     contacts: [],
     kind: "letter",
     platform: null,
@@ -135,5 +144,69 @@ describe("DocumentDetailClient's kind correction control", () => {
 
     await waitFor(() => expect(screen.getByText(/Bitte heben Sie zuerst die Zahlungszuordnung auf/)).toBeTruthy());
     expect(reclassifyDocumentActionMock).toHaveBeenCalledWith({ documentId: "doc-9", kind: "incoming_invoice" });
+  });
+});
+
+// decisions/0080-ledger-double-entry-bookkeeping.md, phase 2: the tax fields, read-only.
+describe("DocumentDetailClient's tax fields", () => {
+  // `Intl` separates the amount from "€" with a no-break space.
+  const normalize = (text: string | null) => (text ?? "").replace(/\u00a0/g, " ");
+
+  it("shows one compact line per rate, the totals for several rates, and the service period", () => {
+    renderDetail(
+      baseDocument({
+        kind: "incoming_invoice",
+        direction: "incoming",
+        totalAmountCents: 18188,
+        currency: "EUR",
+        taxBreakdown: [
+          { ratePercent: 19, netCents: 10788, taxCents: 2050 },
+          { ratePercent: 7, netCents: 5000, taxCents: 350 },
+        ],
+        netTotalCents: 15788,
+        taxTotalCents: 2400,
+        servicePeriodFrom: "2026-03-01",
+        servicePeriodTo: "2026-03-31",
+        taxCheck: "consistent",
+      }),
+    );
+    const text = normalize(document.body.textContent);
+    expect(text).toContain("Netto 107,88 €, USt 19 % 20,50 €");
+    expect(text).toContain("Netto 50,00 €, USt 7 % 3,50 €");
+    expect(text).toContain("Summe");
+    expect(text).toContain("Netto 157,88 €, USt 24,00 €");
+    expect(text).toContain("Leistungszeitraum");
+    expect(text).not.toContain("Reverse Charge");
+    expect(screen.queryByRole("note")).toBeNull();
+  });
+
+  it("shows reverse charge, pass-through costs, the service date and an inconsistency hint", () => {
+    renderDetail(
+      baseDocument({
+        kind: "incoming_invoice",
+        direction: "incoming",
+        totalAmountCents: 81583,
+        currency: "EUR",
+        taxBreakdown: [{ ratePercent: 19, netCents: 67798, taxCents: 12882 }],
+        passThroughCents: 900,
+        reverseCharge: true,
+        serviceDate: "2026-06-30",
+        taxCheck: "inconsistent",
+      }),
+    );
+    const text = normalize(document.body.textContent);
+    expect(text).toContain("Netto 677,98 €, USt 19 % 128,82 €");
+    expect(text).toContain("Reverse Charge");
+    expect(text).toContain("Durchlaufende Posten");
+    expect(text).toContain("9,00 €");
+    expect(text).toContain("Leistungsdatum");
+    expect(screen.getByRole("note").textContent).toContain("passen nicht zum Rechnungsbetrag");
+  });
+
+  it("shows no tax rows for a document without tax fields", () => {
+    renderDetail(baseDocument({ kind: "letter" }));
+    const text = normalize(document.body.textContent);
+    expect(text).not.toContain("Leistungsdatum");
+    expect(text).not.toContain("Durchlaufende Posten");
   });
 });
