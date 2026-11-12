@@ -12,7 +12,8 @@
 // mail-intake.ts -> src/modules/mail-intake (decisions/0075-email-intake.md, references only
 // workspaces.ts/auth.ts, so its position after them is all it needs), invoices.ts ->
 // src/modules/invoicing (decisions/0079-outgoing-invoices.md, references auth.ts/contacts.ts/
-// workspaces.ts). Load
+// workspaces.ts), ledger.ts -> src/modules/ledger (decisions/0080-ledger-double-entry-bookkeeping.md,
+// references only workspaces.ts; source rows are plain uuid values, so it may come last). Load
 // order matters here: contacts.ts, intake-fingerprints.ts, and accounts.ts each reference
 // workspaces.ts (and/or documents.ts), so all three are exported last; payments.ts references
 // accounts.ts/contacts.ts/documents.ts in turn, so it is exported last of all.
@@ -27,3 +28,4 @@ export * from "./accounts";
 export * from "./payments";
 export * from "./mail-intake";
 export * from "./invoices";
+export * from "./ledger";

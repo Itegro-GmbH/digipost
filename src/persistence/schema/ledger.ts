@@ -1,0 +1,392 @@
+// Owner: src/modules/ledger (decisions/0080-ledger-double-entry-bookkeeping.md). Only
+// `repositories/drizzle/ledger-repository.ts` writes these tables (§5.7 "only the owner
+// writes").
+//
+// Every table is workspace-owned and cascades from `workspaces.id` (decisions/0080's "Cascade
+// verification"). Ledger-internal references (lines to entries and accounts, matches to lines,
+// rules to accounts) are real foreign keys, composite with `workspace_id` where a row points at
+// another workspace-owned row, so a line can never land on another workspace's account.
+//
+// References OUT of the ledger (a document, a bank transaction, an `accounts` row, a contact,
+// a user) are plain uuid values without a foreign key, like `invoices` (decisions/0080 model
+// changes): a booked entry inside a submitted filing period is locked by a trigger
+// (`src/persistence/sql/ledger_filing_lock/`), and an `on delete set null` from a deleted
+// document would be an UPDATE that trigger refuses, blocking the deletion, or would silently
+// change a filed entry. The UI shows "Beleg gelöscht" when a referenced source is gone.
+//
+// A booked entry's lines must sum to zero; a deferred constraint trigger enforces it at commit
+// (`src/persistence/sql/ledger_balanced_entries/`).
+import { sql } from "drizzle-orm";
+import {
+  boolean,
+  check,
+  date,
+  foreignKey,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  unique,
+  uniqueIndex,
+  uuid,
+  type AnyPgColumn,
+} from "drizzle-orm/pg-core";
+
+import {
+  BOOKING_RULE_DIRECTIONS,
+  FILING_KINDS,
+  FILING_STATUSES,
+  JOURNAL_ENTRY_ORIGINS,
+  JOURNAL_ENTRY_STATUSES,
+  LEDGER_ACCOUNT_GROUPS,
+  LEDGER_ACCOUNT_KINDS,
+  LEDGER_CHARTS,
+  LEDGER_OWNER_TYPES,
+  OPEN_ITEM_MATCH_KINDS,
+  REVISION_CHANGE_KINDS,
+  TAX_CODES,
+  TAX_ROLES,
+  VAT_BASES,
+  VAT_PERIODS,
+  type EntrySnapshot,
+  type ProposalWarningCode,
+} from "@/modules/ledger";
+
+import { workspaces } from "./workspaces";
+
+/** One row per workspace, created when an admin first saves the ledger settings. No row means
+ * the ledger is off (decisions/0080: internal, off by default). */
+export const ledgerSettings = pgTable("ledger_settings", {
+  workspaceId: uuid()
+    .primaryKey()
+    .references(() => workspaces.id, { onDelete: "cascade" }),
+  enabled: boolean().notNull().default(false),
+  vatPeriod: text({ enum: VAT_PERIODS }).notNull().default("month"),
+  vatBasis: text({ enum: VAT_BASES }).notNull().default("soll"),
+  /** The first day the books cover; nothing before it is expected to be booked. */
+  startDate: date({ mode: "string" }),
+  chart: text({ enum: LEDGER_CHARTS }).notNull().default("skr04"),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+});
+
+/** The chart of accounts (SKR 04 numbers). Never deleted, only archived: lines point at it. */
+export const ledgerAccounts = pgTable(
+  "ledger_accounts",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    workspaceId: uuid()
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    number: text().notNull(),
+    name: text().notNull(),
+    kind: text({ enum: LEDGER_ACCOUNT_KINDS }).notNull(),
+    group: text({ enum: LEDGER_ACCOUNT_GROUPS }).notNull(),
+    openItems: boolean().notNull().default(false),
+    ownerType: text({ enum: LEDGER_OWNER_TYPES }),
+    /** Plain values, no foreign key (see the header). */
+    ownerBankAccountId: uuid(),
+    ownerContactId: uuid(),
+    ownerPlatform: text(),
+    ownerPersonName: text(),
+    description: text(),
+    archivedAt: timestamp({ withTimezone: true }),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("ledger_accounts_workspace_number_key").on(t.workspaceId, t.number),
+    // The target of the composite foreign keys below.
+    unique("ledger_accounts_workspace_id_key").on(t.workspaceId, t.id),
+    uniqueIndex("ledger_accounts_workspace_bank_owner_key").on(t.workspaceId, t.ownerBankAccountId).where(sql`${t.ownerBankAccountId} is not null`),
+    uniqueIndex("ledger_accounts_workspace_contact_owner_key").on(t.workspaceId, t.ownerContactId).where(sql`${t.ownerContactId} is not null`),
+    uniqueIndex("ledger_accounts_workspace_platform_owner_key").on(t.workspaceId, t.ownerPlatform).where(sql`${t.ownerPlatform} is not null`),
+    check("ledger_accounts_number_check", sql`${t.number} ~ '^[0-9]{4,8}$'`),
+    check(
+      "ledger_accounts_owner_check",
+      sql`(coalesce(${t.ownerType}, '') = 'bank_account') = (${t.ownerBankAccountId} is not null)
+        and (coalesce(${t.ownerType}, '') = 'contact') = (${t.ownerContactId} is not null)
+        and (coalesce(${t.ownerType}, '') = 'platform') = (${t.ownerPlatform} is not null)
+        and (coalesce(${t.ownerType}, '') = 'person') = (${t.ownerPersonName} is not null)`,
+    ),
+  ],
+);
+
+/** A filing sent to the tax office: a USt-VA for a period, or an annual statement for a year.
+ * Once `submitted`, every booked entry in its period is locked (see the header). A correction
+ * is a new row pointing at the filing it corrects; while it is a `draft`, entries assigned to
+ * it may still change inside the locked period. */
+export const ledgerFilings = pgTable(
+  "ledger_filings",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    workspaceId: uuid()
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    kind: text({ enum: FILING_KINDS }).notNull(),
+    status: text({ enum: FILING_STATUSES }).notNull().default("draft"),
+    periodFrom: date({ mode: "string" }).notNull(),
+    periodTo: date({ mode: "string" }).notNull(),
+    submittedOn: date({ mode: "string" }),
+    /** Zahllast (positive) or refund (negative) as the submission protocol states it. */
+    amountCents: integer(),
+    /** `no action`: a workspace deletion removes both rows in the same statement. */
+    correctsFilingId: uuid().references((): AnyPgColumn => ledgerFilings.id),
+    note: text(),
+    createdByUserId: uuid(),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("ledger_filings_workspace_id_key").on(t.workspaceId, t.id),
+    index("ledger_filings_workspace_period_idx").on(t.workspaceId, t.periodFrom, t.periodTo),
+    // One original filing per kind and period; corrections are separate rows.
+    uniqueIndex("ledger_filings_original_key").on(t.workspaceId, t.kind, t.periodFrom, t.periodTo).where(sql`${t.correctsFilingId} is null`),
+    // At most one open correction per filing.
+    uniqueIndex("ledger_filings_open_correction_key").on(t.correctsFilingId).where(sql`${t.correctsFilingId} is not null and ${t.status} = 'draft'`),
+    check("ledger_filings_period_check", sql`${t.periodFrom} <= ${t.periodTo}`),
+    check("ledger_filings_submitted_check", sql`${t.status} = 'draft' or ${t.submittedOn} is not null`),
+  ],
+);
+
+export const journalEntries = pgTable(
+  "journal_entries",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    workspaceId: uuid()
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    bookingDate: date({ mode: "string" }).notNull(),
+    documentDate: date({ mode: "string" }),
+    serviceDate: date({ mode: "string" }),
+    text: text().notNull(),
+    status: text({ enum: JOURNAL_ENTRY_STATUSES }).notNull().default("proposed"),
+    origin: text({ enum: JOURNAL_ENTRY_ORIGINS }).notNull(),
+    /** The AI's one-sentence reason, or the template/rule that produced the proposal. */
+    originReason: text(),
+    /** Idempotency key of the proposal engine ("doc:<id>", "tx:<id>", ...). Kept on a dismissed
+     * proposal so the same source is never proposed again. */
+    sourceKey: text(),
+    /** Plain values, no foreign key (see the header). */
+    documentId: uuid(),
+    transactionId: uuid(),
+    correctionOfEntryId: uuid(),
+    /** A draft correcting filing this entry belongs to: the only way to change a locked period. */
+    filingId: uuid(),
+    warnings: jsonb().$type<ProposalWarningCode[]>().notNull().default([]),
+    dismissedAt: timestamp({ withTimezone: true }),
+    /** When a human last edited it; the proposal engine leaves such a proposal alone. */
+    userEditedAt: timestamp({ withTimezone: true }),
+    revision: integer().notNull().default(1),
+    bookedAt: timestamp({ withTimezone: true }),
+    bookedByUserId: uuid(),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("journal_entries_workspace_id_key").on(t.workspaceId, t.id),
+    uniqueIndex("journal_entries_workspace_source_key").on(t.workspaceId, t.sourceKey).where(sql`${t.sourceKey} is not null`),
+    index("journal_entries_workspace_booking_date_idx").on(t.workspaceId, t.bookingDate),
+    index("journal_entries_workspace_document_idx").on(t.workspaceId, t.documentId),
+    index("journal_entries_workspace_transaction_idx").on(t.workspaceId, t.transactionId),
+    foreignKey({ name: "journal_entries_filing_fk", columns: [t.workspaceId, t.filingId], foreignColumns: [ledgerFilings.workspaceId, ledgerFilings.id] }),
+    check("journal_entries_dismissed_check", sql`${t.dismissedAt} is null or ${t.status} = 'proposed'`),
+    check("journal_entries_booked_check", sql`${t.status} = 'proposed' or ${t.bookedAt} is not null`),
+    check("journal_entries_revision_check", sql`${t.revision} >= 1`),
+  ],
+);
+
+export const journalLines = pgTable(
+  "journal_lines",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    workspaceId: uuid()
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    entryId: uuid().notNull(),
+    position: integer().notNull(),
+    accountId: uuid().notNull(),
+    /** Signed: debit (Soll) positive, credit (Haben) negative. */
+    amountCents: integer().notNull(),
+    taxCode: text({ enum: TAX_CODES }),
+    taxRole: text({ enum: TAX_ROLES }),
+    generatedFromLinePosition: integer(),
+    text: text(),
+  },
+  (t) => [
+    unique("journal_lines_entry_position_key").on(t.entryId, t.position),
+    index("journal_lines_workspace_account_idx").on(t.workspaceId, t.accountId),
+    foreignKey({ name: "journal_lines_entry_fk", columns: [t.workspaceId, t.entryId], foreignColumns: [journalEntries.workspaceId, journalEntries.id] }).onDelete("cascade"),
+    foreignKey({ name: "journal_lines_account_fk", columns: [t.workspaceId, t.accountId], foreignColumns: [ledgerAccounts.workspaceId, ledgerAccounts.id] }),
+    check("journal_lines_amount_check", sql`${t.amountCents} <> 0`),
+    check("journal_lines_position_check", sql`${t.position} >= 1`),
+    check("journal_lines_tax_role_check", sql`${t.taxRole} is null or ${t.taxCode} is not null`),
+  ],
+);
+
+/** The full previous state of an entry on every change. `entry_ref` keeps the entry's id after
+ * the entry itself is deleted (`entry_id` is then set null), so a deletion stays visible. */
+export const journalEntryRevisions = pgTable(
+  "journal_entry_revisions",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    workspaceId: uuid()
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    entryId: uuid().references(() => journalEntries.id, { onDelete: "set null" }),
+    entryRef: uuid().notNull(),
+    revision: integer().notNull(),
+    changeKind: text({ enum: REVISION_CHANGE_KINDS }).notNull(),
+    reason: text(),
+    /** The entry's booking date after the change (before it, for a deletion): what a handover's
+     * "changes since" counts by. */
+    bookingDate: date({ mode: "string" }).notNull(),
+    /** The entry and its lines BEFORE the change; `null` for `created`. */
+    snapshot: jsonb().$type<EntrySnapshot | null>(),
+    changedByUserId: uuid(),
+    changedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("journal_entry_revisions_entry_idx").on(t.workspaceId, t.entryRef, t.revision),
+    index("journal_entry_revisions_changed_idx").on(t.workspaceId, t.changedAt),
+  ],
+);
+
+export const ledgerOpenItemMatches = pgTable(
+  "ledger_open_item_matches",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    workspaceId: uuid()
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    accountId: uuid().notNull(),
+    kind: text({ enum: OPEN_ITEM_MATCH_KINDS }).notNull(),
+    note: text(),
+    createdByUserId: uuid(),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("ledger_open_item_matches_account_idx").on(t.workspaceId, t.accountId),
+    foreignKey({ name: "ledger_open_item_matches_account_fk", columns: [t.workspaceId, t.accountId], foreignColumns: [ledgerAccounts.workspaceId, ledgerAccounts.id] }),
+    check("ledger_open_item_matches_note_check", sql`${t.kind} = 'match' or ${t.note} is not null`),
+  ],
+);
+
+/** A line belongs to at most one match. */
+export const ledgerOpenItemMatchLines = pgTable(
+  "ledger_open_item_match_lines",
+  {
+    workspaceId: uuid()
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    matchId: uuid()
+      .notNull()
+      .references(() => ledgerOpenItemMatches.id, { onDelete: "cascade" }),
+    lineId: uuid()
+      .notNull()
+      .references(() => journalLines.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.matchId, t.lineId] }), unique("ledger_open_item_match_lines_line_key").on(t.lineId)],
+);
+
+/** "Für <Kontakt> künftig so vorschlagen": a contact or counterparty pattern to an account and
+ * tax code, optionally booked against an open-item account instead of the payables. */
+export const ledgerBookingRules = pgTable(
+  "ledger_booking_rules",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    workspaceId: uuid()
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** Plain value, no foreign key (see the header). */
+    contactId: uuid(),
+    /** Lowercase; a counterparty name containing it matches. */
+    counterpartyPattern: text(),
+    direction: text({ enum: BOOKING_RULE_DIRECTIONS }).notNull().default("any"),
+    accountId: uuid().notNull(),
+    taxCode: text({ enum: TAX_CODES }),
+    paymentAccountId: uuid(),
+    /** A rule for a bank transaction without a document (share capital to 2900). */
+    noDocument: boolean().notNull().default(false),
+    active: boolean().notNull().default(true),
+    hits: integer().notNull().default(0),
+    learnedFromEntryId: uuid(),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("ledger_booking_rules_workspace_idx").on(t.workspaceId, t.active),
+    foreignKey({ name: "ledger_booking_rules_account_fk", columns: [t.workspaceId, t.accountId], foreignColumns: [ledgerAccounts.workspaceId, ledgerAccounts.id] }),
+    foreignKey({
+      name: "ledger_booking_rules_payment_account_fk",
+      columns: [t.workspaceId, t.paymentAccountId],
+      foreignColumns: [ledgerAccounts.workspaceId, ledgerAccounts.id],
+    }),
+    check("ledger_booking_rules_target_check", sql`${t.contactId} is not null or ${t.counterpartyPattern} is not null`),
+    check("ledger_booking_rules_hits_check", sql`${t.hits} >= 0`),
+  ],
+);
+
+/** "An Steuerberaterin übergeben": a marker; changes since are revisions written after it. */
+export const ledgerHandovers = pgTable(
+  "ledger_handovers",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    workspaceId: uuid()
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    periodFrom: date({ mode: "string" }).notNull(),
+    periodTo: date({ mode: "string" }).notNull(),
+    note: text(),
+    createdByUserId: uuid(),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ledger_handovers_workspace_idx").on(t.workspaceId, t.createdAt), check("ledger_handovers_period_check", sql`${t.periodFrom} <= ${t.periodTo}`)],
+);
+
+/** An uploaded Summen- und Saldenliste of the tax advisor, kept for the comparison. */
+export const ledgerAdvisorBalances = pgTable(
+  "ledger_advisor_balances",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    workspaceId: uuid()
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    periodFrom: date({ mode: "string" }).notNull(),
+    periodTo: date({ mode: "string" }).notNull(),
+    fileName: text(),
+    uploadedByUserId: uuid(),
+    uploadedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("ledger_advisor_balances_workspace_id_key").on(t.workspaceId, t.id),
+    index("ledger_advisor_balances_workspace_idx").on(t.workspaceId, t.periodTo),
+    check("ledger_advisor_balances_period_check", sql`${t.periodFrom} <= ${t.periodTo}`),
+  ],
+);
+
+export const ledgerAdvisorBalanceLines = pgTable(
+  "ledger_advisor_balance_lines",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    workspaceId: uuid()
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    uploadId: uuid().notNull(),
+    accountNumber: text().notNull(),
+    accountName: text(),
+    /** Signed like the ledger: Soll positive, Haben negative. */
+    balanceCents: integer().notNull(),
+  },
+  (t) => [
+    index("ledger_advisor_balance_lines_upload_idx").on(t.uploadId),
+    foreignKey({
+      name: "ledger_advisor_balance_lines_upload_fk",
+      columns: [t.workspaceId, t.uploadId],
+      foreignColumns: [ledgerAdvisorBalances.workspaceId, ledgerAdvisorBalances.id],
+    }).onDelete("cascade"),
+  ],
+);

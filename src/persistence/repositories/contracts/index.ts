@@ -22,6 +22,7 @@ import type { DocumentRepository } from "./documents-repository";
 import type { IntakeFingerprintRepository } from "./intake-fingerprints-repository";
 import type { InvoiceRepository } from "./invoices-repository";
 import type { JobsRepository } from "./jobs-repository";
+import type { LedgerRepository } from "./ledger-repository";
 import type { MailIntakeRepository } from "./mail-intake-repository";
 import type {
   DocumentTransactionRepository,
@@ -147,6 +148,36 @@ export type {
   InvoiceWithCounterpart,
 } from "./invoices-repository";
 export type {
+  BankAccountSourceRow,
+  BankTransactionMovementRow,
+  CreateBookingRuleRow,
+  CreateFilingRow,
+  CreateJournalEntryRow,
+  CreateJournalLineRow,
+  CreateLedgerAccountRow,
+  CreateRevisionRow,
+  JournalEntryFilter,
+  JournalEntryPatch,
+  JournalEntryRevisionRow,
+  JournalEntryRow,
+  JournalLineRow,
+  JournalLineWithAccount,
+  LedgerAccountPatch,
+  LedgerAccountRow,
+  LedgerAdvisorBalanceLineRow,
+  LedgerAdvisorBalanceRow,
+  LedgerBookingRuleRow,
+  LedgerEntryCounts,
+  LedgerFilingRow,
+  LedgerHandoverRow,
+  LedgerOpenItemMatchRow,
+  LedgerReportLineRow,
+  LedgerRepository,
+  LedgerSettingsPatch,
+  LedgerSettingsRow,
+  SourceKeyRow,
+} from "./ledger-repository";
+export type {
   CreateDocumentTransactionRow,
   DecideDocumentTransactionInput,
   DocumentTransactionRepository,
@@ -188,6 +219,8 @@ export type Repositories = {
   mailIntake: MailIntakeRepository;
   /** decisions/0079-outgoing-invoices.md, owner `src/modules/invoicing`. */
   invoice: InvoiceRepository;
+  /** decisions/0080-ledger-double-entry-bookkeeping.md, owner `src/modules/ledger`. */
+  ledger: LedgerRepository;
   // … one entry per repository
 };
 

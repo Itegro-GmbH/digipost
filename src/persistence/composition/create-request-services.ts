@@ -35,6 +35,7 @@ import { createContactUseCases } from "@/persistence/use-cases/contacts-use-case
 import { createDocumentUseCases } from "@/persistence/use-cases/documents-use-cases";
 import { createInvoiceUseCases } from "@/persistence/use-cases/invoices-use-cases";
 import { createJobsUseCases } from "@/persistence/use-cases/jobs-use-cases";
+import { createLedgerUseCases } from "@/persistence/use-cases/ledger-use-cases";
 import { createMailIntakeUseCases } from "@/persistence/use-cases/mail-intake-use-cases";
 import { createPaymentsUseCases } from "@/persistence/use-cases/payments-use-cases";
 import { createSystemUseCases } from "@/persistence/use-cases/system-use-cases";
@@ -114,6 +115,12 @@ export function createRequestServices() {
   // the plainest wiring of all (`{ repos }`, no `uow`: it never writes).
   const closing = createClosingUseCases({ repos });
 
+  // decisions/0080-ledger-double-entry-bookkeeping.md: the ledger writes only its own tables and
+  // reads the sources (bank accounts, transactions, documents, contacts) through read methods,
+  // so the plain `{ repos, uow }` wiring is all it needs. The proposal engine (a later stage)
+  // will get its ports here.
+  const ledger = createLedgerUseCases({ repos, uow });
+
   return {
     system: createSystemUseCases({ repos }),
     workspaces,
@@ -125,6 +132,7 @@ export function createRequestServices() {
     closing,
     mailIntake,
     invoices,
+    ledger,
     jobs: createJobsUseCases({ repos, uow, handlers: jobHandlers }),
   };
 }
