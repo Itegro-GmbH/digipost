@@ -25,6 +25,21 @@ import { intakeSourceFingerprints } from "@/persistence/schema/intake-fingerprin
 import { jobs } from "@/persistence/schema/jobs";
 import { inboundEmails, mailIntakeAllowedSenders, mailIntakeSettings } from "@/persistence/schema/mail-intake";
 import { invoiceDrafts, invoiceEvents, invoiceNumberSequences, invoices } from "@/persistence/schema/invoices";
+import {
+  journalEntries,
+  journalEntryRevisions,
+  journalLines,
+  ledgerAccounts,
+  ledgerAdvisorBalanceLines,
+  ledgerAdvisorBalances,
+  ledgerBookingAdvice,
+  ledgerBookingRules,
+  ledgerFilings,
+  ledgerHandovers,
+  ledgerOpenItemMatches,
+  ledgerOpenItemMatchLines,
+  ledgerSettings,
+} from "@/persistence/schema/ledger";
 import { documentTransactions, paymentAliases, paymentArbiterAnswers, paymentNoDocumentRules, paymentRejections } from "@/persistence/schema/payments";
 import { workspaceInvitations, workspaceMembers } from "@/persistence/schema/workspaces";
 
@@ -570,6 +585,46 @@ describe("createDrizzleWorkspaceRepository.delete (F5, decisions/0027-hardening-
     });
     await db.insert(invoiceEvents).values({ workspaceId: workspace.id, invoiceId, kind: "issued" });
 
+    // decisions/0080-ledger-double-entry-bookkeeping.md: every ledger table. The booked entry
+    // lies inside a submitted USt-VA period, so it is locked by its trigger, and the filing itself
+    // is frozen: this cascade is the one DELETE both triggers let through.
+    await db.insert(ledgerSettings).values({ workspaceId: workspace.id, enabled: true });
+    const [bankLedger, capitalLedger] = await db
+      .insert(ledgerAccounts)
+      .values([
+        { workspaceId: workspace.id, number: "1800", name: "Bank", kind: "asset", group: "bank", ownerType: "bank_account", ownerBankAccountId: account.id },
+        { workspaceId: workspace.id, number: "2900", name: "Gezeichnetes Kapital", kind: "equity", group: "equity" },
+      ])
+      .returning();
+    if (!bankLedger || !capitalLedger) throw new Error("failed to insert ledger account fixtures");
+    const { entryId, lineId } = await db.transaction(async (tx) => {
+      const [entry] = await tx
+        .insert(journalEntries)
+        .values({ workspaceId: workspace.id, bookingDate: "2026-01-01", text: "Stammkapital", status: "booked", origin: "manual", transactionId: transaction.id, bookedAt: new Date() })
+        .returning();
+      if (!entry) throw new Error("failed to insert journal entry fixture");
+      const [line] = await tx
+        .insert(journalLines)
+        .values([
+          { workspaceId: workspace.id, entryId: entry.id, position: 1, accountId: bankLedger.id, amountCents: 1000 },
+          { workspaceId: workspace.id, entryId: entry.id, position: 2, accountId: capitalLedger.id, amountCents: -1000 },
+        ])
+        .returning();
+      if (!line) throw new Error("failed to insert journal line fixture");
+      return { entryId: entry.id, lineId: line.id };
+    });
+    await db.insert(journalEntryRevisions).values({ workspaceId: workspace.id, entryId, entryRef: entryId, revision: 1, changeKind: "created", bookingDate: "2026-01-01" });
+    const [match] = await db.insert(ledgerOpenItemMatches).values({ workspaceId: workspace.id, accountId: bankLedger.id, kind: "explained", note: "Anfangsbestand" }).returning();
+    if (!match) throw new Error("failed to insert open-item match fixture");
+    await db.insert(ledgerOpenItemMatchLines).values({ workspaceId: workspace.id, matchId: match.id, lineId });
+    await db.insert(ledgerBookingRules).values({ workspaceId: workspace.id, counterpartyPattern: "stammkapital", accountId: capitalLedger.id, noDocument: true });
+    await db.insert(ledgerFilings).values({ workspaceId: workspace.id, kind: "vat_return", status: "submitted", periodFrom: "2026-01-01", periodTo: "2026-03-31", submittedOn: "2026-04-10" });
+    await db.insert(ledgerHandovers).values({ workspaceId: workspace.id, periodFrom: "2026-01-01", periodTo: "2026-03-31" });
+    const [advisorUpload] = await db.insert(ledgerAdvisorBalances).values({ workspaceId: workspace.id, periodFrom: "2026-01-01", periodTo: "2026-03-31" }).returning();
+    if (!advisorUpload) throw new Error("failed to insert advisor upload fixture");
+    await db.insert(ledgerAdvisorBalanceLines).values({ workspaceId: workspace.id, uploadId: advisorUpload.id, accountNumber: "1800", balanceCents: 1000 });
+    await db.insert(ledgerBookingAdvice).values({ workspaceId: workspace.id, documentId: randomUUID(), cacheKey: "k", answer: { accountNumber: "6300", taxCode: null, reason: "Test." } });
+
     // A second workspace's own document, to prove the delete below never reaches it.
     const [otherDocument] = await db
       .insert(documents)
@@ -613,6 +668,23 @@ describe("createDrizzleWorkspaceRepository.delete (F5, decisions/0027-hardening-
     expect(await db.select().from(invoiceNumberSequences).where(eq(invoiceNumberSequences.workspaceId, workspace.id))).toHaveLength(0);
     expect(await db.select().from(invoices).where(eq(invoices.workspaceId, workspace.id))).toHaveLength(0);
     expect(await db.select().from(invoiceEvents).where(eq(invoiceEvents.workspaceId, workspace.id))).toHaveLength(0);
+    for (const table of [
+      ledgerSettings,
+      ledgerAccounts,
+      journalEntries,
+      journalLines,
+      journalEntryRevisions,
+      ledgerOpenItemMatches,
+      ledgerOpenItemMatchLines,
+      ledgerBookingRules,
+      ledgerFilings,
+      ledgerHandovers,
+      ledgerAdvisorBalances,
+      ledgerAdvisorBalanceLines,
+      ledgerBookingAdvice,
+    ]) {
+      expect(await db.select().from(table).where(eq(table.workspaceId, workspace.id))).toHaveLength(0);
+    }
     // `document_contacts` has no `workspace_id` column of its own - scoped via the document
     // it cascaded from instead.
     expect(await db.select().from(documentContacts).where(eq(documentContacts.documentId, document.id))).toHaveLength(0);

@@ -339,6 +339,54 @@ export function createDrizzleTransactionRepository(db: DbExecutor): TransactionR
       await db.update(transactions).set({ transferGroupId }).where(inArray(transactions.id, transactionIds));
     },
 
+    async listForLedger(workspaceId) {
+      // The partner of a transfer group sits on a clearing account (an app-store payout or a
+      // supplier charge booked there, decisions/0026/0048/0068); the report documents are those
+      // whose payout settlement line IS that partner row. A correlated subquery returning one
+      // json object, so this row is never multiplied.
+      const rows = await db
+        .select({
+          id: transactions.id,
+          accountId: transactions.accountId,
+          bookingDate: transactions.bookingDate,
+          amountCents: transactions.amountCents,
+          currency: sql<string>`coalesce(${transactions.currency}, ${accounts.currency})`,
+          counterpartyName: transactions.counterpartyName,
+          counterpartyIban: transactions.counterpartyIban,
+          remittanceText: transactions.remittanceText,
+          noDocumentNeeded: transactions.noDocumentNeeded,
+          pairedClearing: sql<{ accountId: string; platform: string | null; contactId: string | null; reportDocumentIds: string[] | null } | null>`(
+            select json_build_object(
+              'accountId', ca.id,
+              'platform', ca.platform,
+              'contactId', ca.contact_id,
+              'reportDocumentIds', (
+                select json_agg(distinct sl.source_document_id)
+                from settlement_lines sl
+                where sl.transaction_id = pt.id and sl.workspace_id = pt.workspace_id and sl.type = 'payout'
+              )
+            )
+            from transactions pt
+            join accounts ca on ca.id = pt.account_id and ca.workspace_id = pt.workspace_id
+            where ${transactions.transferGroupId} is not null
+              and pt.transfer_group_id = ${transactions.transferGroupId}
+              and pt.workspace_id = ${transactions.workspaceId}
+              and pt.id <> ${transactions.id}
+              and ca.type = 'clearing'
+            order by pt.created_at
+            limit 1
+          )`,
+        })
+        .from(transactions)
+        .innerJoin(accounts, and(eq(accounts.id, transactions.accountId), eq(accounts.workspaceId, transactions.workspaceId)))
+        .where(and(eq(transactions.workspaceId, workspaceId), eq(accounts.type, "bank")))
+        .orderBy(asc(transactions.bookingDate), asc(transactions.id));
+      return rows.map((row) => ({
+        ...row,
+        pairedClearing: row.pairedClearing ? { ...row.pairedClearing, reportDocumentIds: row.pairedClearing.reportDocumentIds ?? [] } : null,
+      }));
+    },
+
     async findUnpairedBankMatch(workspaceId, candidate) {
       const conditions = [
         eq(transactions.workspaceId, workspaceId),
@@ -404,6 +452,24 @@ export function createDrizzleSettlementLineRepository(db: DbExecutor): Settlemen
         );
       return row?.sum ?? 0;
     },
+
+    listForLedger: (workspaceId) =>
+      db
+        .select({
+          id: settlementLines.id,
+          sourceDocumentId: settlementLines.sourceDocumentId,
+          platform: accounts.platform,
+          type: settlementLines.type,
+          grossCents: settlementLines.grossCents,
+          feeCents: settlementLines.feeCents,
+          netCents: settlementLines.netCents,
+          currency: settlementLines.currency,
+          bookingDate: settlementLines.bookingDate,
+        })
+        .from(settlementLines)
+        .innerJoin(accounts, and(eq(accounts.id, settlementLines.clearingAccountId), eq(accounts.workspaceId, settlementLines.workspaceId)))
+        .where(eq(settlementLines.workspaceId, workspaceId))
+        .orderBy(asc(settlementLines.sourceDocumentId), asc(settlementLines.bookingDate), asc(settlementLines.id)),
 
     async listUnpairedPayoutLines(workspaceId) {
       const rows = await db

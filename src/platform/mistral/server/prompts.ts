@@ -32,6 +32,38 @@ import { describeGuardedSection, neutralizeDelimiterLookalikes, wrapUntrustedSec
  * description and the user-prompt wrapping can never drift apart. */
 const DOCUMENT_TEXT_LABEL = "DOCUMENT_TEXT";
 
+/** Appended to every prompt's closing "no arithmetic" sentence (decisions/0080, phase 2). */
+const TAX_RULE =
+  " Das gilt auch für Steuerbeträge: Berechne niemals einen fehlenden Netto- oder Steuerbetrag selbst, sondern setze ihn auf null.";
+
+/** The `"invoice"` block of every analyzer prompt (the ungated `SYSTEM_PROMPT` and both guided
+ * prompts), kept as one constant so the three JSON contracts cannot drift apart from each other
+ * or from `core/analysis-validation.ts`'s `toInvoiceFields`/`core/tax-fields.ts`'s
+ * `toExtractedTaxFields`. Every amount is the printed text, never a number the model computed
+ * (decisions/0021); the tax fields are decisions/0080-ledger-double-entry-bookkeeping.md's
+ * phase 2. */
+const INVOICE_JSON_FIELDS = `    "invoiceNumber": "<Rechnungsnummer oder null>",
+    "totalAmount": "<Rechnungsbetrag GENAU wie im Dokument gedruckt, z. B. \\"1.083,68 EUR\\", oder null>",
+    "currency": "<ISO-4217-Code, z. B. EUR, oder null>",
+    "dueDate": "<Fälligkeitsdatum im Format YYYY-MM-DD oder null>",
+    "paymentIban": "<IBAN für die Zahlung oder null>",
+    "paymentReference": "<Verwendungszweck oder null>",
+    "paidNote": "<Vermerk auf dem Dokument, z. B. \\"bezahlt per Kreditkarte\\", oder null>",
+    "netTotalAmount": "<Nettobetrag gesamt GENAU wie gedruckt, z. B. \\"107,88 EUR\\", oder null>",
+    "taxTotalAmount": "<Umsatzsteuer/MwSt. gesamt GENAU wie gedruckt, oder null>",
+    "taxBreakdown": [
+      {
+        "rate": "<Steuersatz wie gedruckt, z. B. \\"19 %\\">",
+        "netAmount": "<Nettobetrag zu diesem Steuersatz GENAU wie gedruckt oder null>",
+        "taxAmount": "<Steuerbetrag zu diesem Steuersatz GENAU wie gedruckt oder null>"
+      }
+    ] (eine Zeile je gedrucktem Steuersatz, nur was wirklich gedruckt ist; leeres Array [], wenn keine Aufschlüsselung gedruckt ist),
+    "passThroughAmount": "<Summe durchlaufender Posten / Auslagen ohne USt GENAU wie gedruckt, oder null>",
+    "reverseCharge": <true, wenn das Dokument auf die Steuerschuldnerschaft des Leistungsempfängers (Reverse Charge, § 13b UStG) hinweist, sonst false>,
+    "serviceDate": "<Leistungsdatum/Lieferdatum im Format YYYY-MM-DD oder null>",
+    "servicePeriodFrom": "<Beginn des Leistungszeitraums im Format YYYY-MM-DD oder null>",
+    "servicePeriodTo": "<Ende des Leistungszeitraums im Format YYYY-MM-DD oder null>"`;
+
 const SYSTEM_PROMPT = `Du bist ein Assistent, der eingehende und ausgehende Geschäftspost für ein deutsches Kleinunternehmen analysiert.
 Du erhältst den per OCR erkannten Text eines gescannten Briefs. Deine Aufgabe ist es, wichtige Angaben zu extrahieren, einschließlich aller auf dem Dokument genannten Firmen/Institutionen (Parteien) und - falls es sich um eine Rechnung, Mahnung oder Quittung handelt - der Rechnungsangaben.
 
@@ -71,17 +103,11 @@ Antworte ausschließlich mit einem JSON-Objekt exakt in dieser Form, ohne zusät
     }
   ],
   "invoice": {
-    "invoiceNumber": "<Rechnungsnummer oder null>",
-    "totalAmount": "<Rechnungsbetrag GENAU wie im Dokument gedruckt, z. B. \\"1.083,68 EUR\\", oder null>",
-    "currency": "<ISO-4217-Code, z. B. EUR, oder null>",
-    "dueDate": "<Fälligkeitsdatum im Format YYYY-MM-DD oder null>",
-    "paymentIban": "<IBAN für die Zahlung oder null>",
-    "paymentReference": "<Verwendungszweck oder null>",
-    "paidNote": "<Vermerk auf dem Dokument, z. B. \\"bezahlt per Kreditkarte\\", oder null>"
+${INVOICE_JSON_FIELDS}
   } (oder null, wenn es sich nicht um eine Rechnung/Mahnung/Quittung handelt)
 }
 
-Nenne höchstens 3 Parteien, die wichtigsten zuerst. Gib niemals eigene Berechnungen für Beträge an - gib den Betrag exakt so wieder, wie er im Dokument steht, inklusive Tausender- und Dezimaltrennzeichen.`;
+Nenne höchstens 3 Parteien, die wichtigsten zuerst. Gib niemals eigene Berechnungen für Beträge an - gib den Betrag exakt so wieder, wie er im Dokument steht, inklusive Tausender- und Dezimaltrennzeichen.${TAX_RULE}`;
 
 function formatOwnCompanyBlock(ownCompany: OwnCompanyContext): string {
   if (!ownCompany) {
@@ -142,16 +168,6 @@ const PARTY_FIELDS_WITHOUT_ROLE = `      "name": "<Firmen- oder Institutionsname
       "customerNumber": "<Kundennummer (unsere eigene, beim Absender) oder null>",
       "supplierNumber": "<Lieferantennummer oder null>",
       "paymentTermsDays": "<Zahlungsziel in Tagen als Zahl oder null>"`;
-
-/** Identical to `SYSTEM_PROMPT`'s own `"invoice"` block - kept as its own constant for the same
- * drift-prevention reason as `PARTY_FIELDS_WITHOUT_ROLE`. */
-const INVOICE_JSON_FIELDS = `    "invoiceNumber": "<Rechnungsnummer oder null>",
-    "totalAmount": "<Rechnungsbetrag GENAU wie im Dokument gedruckt, z. B. \\"1.083,68 EUR\\", oder null>",
-    "currency": "<ISO-4217-Code, z. B. EUR, oder null>",
-    "dueDate": "<Fälligkeitsdatum im Format YYYY-MM-DD oder null>",
-    "paymentIban": "<IBAN für die Zahlung oder null>",
-    "paymentReference": "<Verwendungszweck oder null>",
-    "paidNote": "<Vermerk auf dem Dokument, z. B. \\"bezahlt per Kreditkarte\\", oder null>"`;
 
 /** H2-wave2.md's correction 1 (decisions/0036-guided-extraction.md's wave 2): no tenant brand
  * names in this prompt. An earlier draft named "PayPal, Stripe, MUSTERBANK" - MUSTERBANK is one specific
@@ -270,7 +286,7 @@ ${INVOICE_JSON_FIELDS}
   } (oder null, wenn es sich nicht um eine Rechnung/Mahnung/Quittung handelt)
 }
 
-Nenne genau eine Gegenpartei, niemals mehrere. Gib niemals eigene Berechnungen für Beträge an - gib den Betrag exakt so wieder, wie er im Dokument steht, inklusive Tausender- und Dezimaltrennzeichen.`;
+Nenne genau eine Gegenpartei, niemals mehrere. Gib niemals eigene Berechnungen für Beträge an - gib den Betrag exakt so wieder, wie er im Dokument steht, inklusive Tausender- und Dezimaltrennzeichen.${TAX_RULE}`;
 
   return `${prompt}${formatGuidedOwnCompanyBlock(ownCompany)}\n\n${describeGuardedSection(DOCUMENT_TEXT_LABEL)}`;
 }
@@ -326,7 +342,7 @@ ${INVOICE_JSON_FIELDS}
   } (oder null, wenn es sich nicht um eine Rechnung/Mahnung/Quittung handelt)
 }
 
-Gib niemals eigene Berechnungen für Beträge an - gib den Betrag exakt so wieder, wie er im Dokument steht, inklusive Tausender- und Dezimaltrennzeichen.`;
+Gib niemals eigene Berechnungen für Beträge an - gib den Betrag exakt so wieder, wie er im Dokument steht, inklusive Tausender- und Dezimaltrennzeichen.${TAX_RULE}`;
 
   return `${prompt}${formatGuidedOwnCompanyBlock(ownCompany)}\n\n${describeGuardedSection(DOCUMENT_TEXT_LABEL)}`;
 }

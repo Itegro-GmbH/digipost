@@ -42,7 +42,11 @@ Maintenance triggers:
   its own contents (decisions/0061-a-statement-is-dated-by-its-last-booking.md)
 - The shared effective-date expression (`documentEffectiveDate`) changes - it also scopes
   `src/modules/closing`'s periods (decisions/0066-abschluss-check-and-export.md)
-Last verified: 2026-11-05, decisions/0079-outgoing-invoices.md: added `precheckQuota`, `createForIssuedInvoice` and `linkIssuedInvoiceCounterparty` (see "Issued invoices"). Previously 2026-11-03, decisions/0078-mcp-server.md: added `listDocumentSummariesProjection`/
+- The tax fields, their parsing, the consistency check or the `listForLedger` row shape change
+  (decisions/0080-ledger-double-entry-bookkeeping.md, phase 2)
+Last verified: 2026-11-12, decisions/0080-ledger-double-entry-bookkeeping.md phase 2: the tax
+fields (see "Tax fields"), `core/tax-fields.ts`, the ZUGFeRD tax reader, the detail page's tax
+rows and `DocumentRepository.listForLedger`. Previously 2026-11-05, decisions/0079-outgoing-invoices.md: added `precheckQuota`, `createForIssuedInvoice` and `linkIssuedInvoiceCounterparty` (see "Issued invoices"). Previously 2026-11-03, decisions/0078-mcp-server.md: added `listDocumentSummariesProjection`/
 `getDocumentDownloadUrlProjection` (with `DocumentRepository.listSummaries`, which shares
 `list`'s WHERE/ORDER BY through one `listPlan`, and `DocumentUseCases.getDownloadUrl`) for the MCP
 server. Previously 2026-10-22, decisions/0076-match-after-every-trigger.md: a document finishing
@@ -520,7 +524,8 @@ quota semantics; decisions/0016-processing-pipeline-and-ai.md for the processing
   payout-to-bank-credit pairing - `undefined` for every other confirmed tabular source.
 - `core/zugferd-extraction.ts` (F1b) - `extractZugferdInvoiceFields(xmlText)`: a narrow
   CII/UN-CEFACT reader (invoice number, total amount, currency, due date, payment IBAN,
-  seller/buyer name) for an embedded ZUGFeRD/Factur-X/XRechnung invoice XML
+  seller/buyer name, and since decisions/0080 phase 2 the seller's/buyer's VAT id and country
+  and the tax fields, see "Tax fields") for an embedded ZUGFeRD/Factur-X/XRechnung invoice XML
   (`@/modules/intake`'s `extractEmbeddedXml`) - when it finds anything, those fields (and the
   document's `kind`) take priority over the model's own extraction; propagates
   `UnsafeXmlError` for a malicious attachment (never silently swallowed), degrades to `null`
@@ -588,6 +593,54 @@ quota semantics; decisions/0016-processing-pipeline-and-ai.md for the processing
 - `ui/intake-settings-client.tsx` (F1b) - `IntakeSettingsClient`: `/dashboard/settings/intake`'s
   table of confirmed source fingerprints (kind, platform, use count, last used) with
   "Zuordnung zurücksetzen" per row (`resetIntakeFingerprintAction`).
+
+## Tax fields
+
+decisions/0080-ledger-double-entry-bookkeeping.md, phase 2: what a booking needs from an
+invoice, stored on `documents` (migration `0031_document_tax_fields`), all nullable and `null` for
+every document processed before (nothing is reprocessed):
+
+- `tax_breakdown` (jsonb, `DocumentTaxBreakdownEntry[]`: `{ ratePercent, netCents, taxCents }`
+  per printed rate, either amount `null` when only the other is printed), `net_total_cents`,
+  `tax_total_cents`, `pass_through_cents` ("durchlaufende Posten"/"Auslagen ohne USt"),
+  `reverse_charge` (boolean), `service_date`, `service_period_from`/`service_period_to`, and
+  `tax_check` (`consistent`/`inconsistent`, `DOCUMENT_TAX_CHECK_RESULTS`). One jsonb column for the
+  breakdown rather than a child table: it is only ever written and read with its document.
+- The model returns every amount and rate as printed text (`INVOICE_JSON_FIELDS` in
+  `src/platform/mistral/server/prompts.ts`: `netTotalAmount`, `taxTotalAmount`,
+  `taxBreakdown[{ rate, netAmount, taxAmount }]`, `passThroughAmount`, `reverseCharge`,
+  `serviceDate`, `servicePeriodFrom`/`servicePeriodTo`) and is told never to compute a missing
+  one. `core/tax-fields.ts` parses them (`parseGermanAmountToCents`, `parseTaxRatePercent`; a
+  number instead of text is dropped), called from `toInvoiceFields`, so `InvoiceFields` carries
+  them (`ExtractedTaxFields`).
+- An embedded ZUGFeRD XML wins field by field (`ApplicableTradeTax` per category,
+  `TaxBasisTotalAmount`, the invoice-currency `TaxTotalAmount`, category `AE` as reverse charge,
+  `ActualDeliverySupplyChainEvent`/`BillingSpecifiedPeriod`). Reverse charge is also set when the
+  OCR text carries the note ("Steuerschuldnerschaft des Leistungsempfängers", "Reverse Charge",
+  "§ 13b", article 196), unless the XML says otherwise (`resolveDocumentTaxFields`).
+- `checkTaxConsistency` compares, within 2 cents, each rate's tax with net times rate, the rates'
+  sums with the printed totals, and net plus tax plus pass-through with the total. A mismatch only
+  sets `tax_check = 'inconsistent'` (the detail page shows a hint); no figure is changed or filled.
+- The supplier's VAT id and country are NOT document columns: they are the counterparty's own
+  `vatId`/`country` (`ExtractedContactData`), stored on the linked contact. The ZUGFeRD seller's
+  (incoming) or buyer's (outgoing) VAT id and country fill in what the model left empty before
+  the contact link is written; the contact's matching and no-silent-overwrite rule still apply.
+- `DocumentRepository.listForLedger(workspaceId, from?, to?)` is the ledger's read: per document
+  (every status and kind, oldest effective date first, inclusive bounds on the shared
+  `documentEffectiveDate`) the id, effective kind (`coalesce(manual_kind, kind)`), direction,
+  status, document and effective date, title, sender, file name, invoice number, total, currency,
+  platform, effective payment status, every tax field, the counterparty contact (sender link of an
+  incoming document, recipient link of an outgoing one, oldest link first: `contactId`,
+  `contactName`, `contactVatId`, `contactCountry`, the contact's own `workspace_id` checked too),
+  and the confirmed `document_transactions` (`{ transactionId, allocatedAmountCents }`, oldest
+  booking first). Tested against Postgres in `src/persistence/tests/documents-ledger-read.db.test.ts`.
+- `/dashboard/documents/[id]` shows the fields read-only in the "Rechnungsangaben" box: one line per
+  rate ("Netto 107,88 €, USt 19 % 20,50 €"), the totals when there is no breakdown or more than one
+  rate, "Reverse Charge", "Durchlaufende Posten", "Leistungsdatum"/"Leistungszeitraum". Visible to
+  every member like the other invoice fields (document information, not bank information).
+- The fake OCR's Telekom letter prints a 19 % line and a service period; `rechnung-reverse-charge.pdf`
+  is a reverse-charge invoice. The fake analyzer reads "Netto <rate> %:", "USt <rate> %:",
+  "Nettobetrag:", "USt gesamt:", "Durchlaufende Posten:", "Leistungsdatum:", "Leistungszeitraum:".
 
 ## Issued invoices
 

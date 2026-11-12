@@ -14,3 +14,7 @@ export { getIntakeClassifier, resetIntakeClassifierForTests } from "./server/get
 // a separate file from the two above for the same reason (see `get-payment-arbiter.ts`'s own
 // header comment), re-exported from this same privileged entrypoint.
 export { getPaymentArbiter, resetPaymentArbiterForTests } from "./server/get-payment-arbiter";
+// decisions/0080-ledger-double-entry-bookkeeping.md (phase 3): the ledger booking advisor's own
+// adapter getter, the payment arbiter's pattern exactly, re-exported from this same privileged
+// entrypoint.
+export { getLedgerBookingAdvisor, resetLedgerBookingAdvisorForTests } from "./server/get-ledger-booking-advisor";

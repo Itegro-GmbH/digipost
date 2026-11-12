@@ -52,6 +52,7 @@ import {
   nonOwnParties,
   parseIntakeResult,
   planCounterparty,
+  resolveDocumentTaxFields,
   resolvePaymentIban,
   resolveLinkRoles,
   resolveReminderDirection,
@@ -101,6 +102,7 @@ import type {
   DocumentIntakeStatus,
   DocumentRow,
   DocumentStatus,
+  DocumentTaxFields,
   DocumentWithRelations,
   DocumentSummaryRow,
   IntakeFingerprintRow,
@@ -174,7 +176,9 @@ export class MappingValidationError extends UseCaseError<typeof DOCUMENT_ERROR.m
  * as a real record. */
 export const RETENTION_DAYS_REJECTED_INTAKE = 30;
 
-export type Document = {
+/** decisions/0080-ledger-double-entry-bookkeeping.md, phase 2: carries the tax fields too, for
+ * the detail page. */
+export type Document = DocumentTaxFields & {
   id: string;
   workspaceId: string;
   uploadedByUserId: string | null;
@@ -471,6 +475,15 @@ function toDocument(row: DocumentWithRelations): Document {
     paymentIban: row.paymentIban,
     paymentReference: row.paymentReference,
     paidNote: row.paidNote,
+    taxBreakdown: row.taxBreakdown,
+    netTotalCents: row.netTotalCents,
+    taxTotalCents: row.taxTotalCents,
+    passThroughCents: row.passThroughCents,
+    reverseCharge: row.reverseCharge,
+    serviceDate: row.serviceDate,
+    servicePeriodFrom: row.servicePeriodFrom,
+    servicePeriodTo: row.servicePeriodTo,
+    taxCheck: row.taxCheck,
     kind: row.kind as DocumentKind,
     platform: row.platform,
     intakeStatus: row.intakeStatus as DocumentIntakeStatus,
@@ -641,6 +654,17 @@ async function collectOwnIbans(deps: DocumentUseCaseDeps, workspaceId: string, p
  * `processOcrDocument` computes `isInvoiceShaped`. */
 const NEVER_PAYMENT_MATCHED_KINDS: ReadonlySet<DocumentKind> = new Set<DocumentKind>(["reminder", "platform_settlement", "payout_report"]);
 
+/** decisions/0080, phase 2: the counterparty's VAT id and country from the ZUGFeRD XML (the
+ * seller of an incoming invoice, the buyer of an outgoing one) fill in what the model did not
+ * find. Never overwrites a value the model did find: the contact link's own matching and
+ * no-silent-overwrite rule (decisions/0019) decide what happens to an existing contact. */
+function withZugferdTaxIdentity(counterparty: ExtractedContactData, zugferd: ZugferdExtraction | null, role: DocumentContactRole): ExtractedContactData {
+  if (!zugferd) return counterparty;
+  const vatId = role === "sender" ? zugferd.sellerVatId : zugferd.buyerVatId;
+  const country = role === "sender" ? zugferd.sellerCountry : zugferd.buyerCountry;
+  return { ...counterparty, vatId: counterparty.vatId ?? vatId, country: counterparty.country ?? country };
+}
+
 function resolveZugferdKind(zugferd: ZugferdExtraction, ownCompany: OwnCompanyProfile): DocumentKind {
   const isOwnPartyName = (name: string | null) => (name ? isOwnCompany({ name }, ownCompany) : false);
   return isOwnPartyName(zugferd.sellerName) ? "outgoing_invoice" : "incoming_invoice";
@@ -789,7 +813,13 @@ async function processOcrDocument(
     } else {
       direction = plan.ourRole === "sender" ? "outgoing" : "incoming";
       if (guided.counterparty) {
-        linkParties = [{ role: plan.counterpartyRole, relationType: plan.relationType, extracted: guided.counterparty }];
+        linkParties = [
+          {
+            role: plan.counterpartyRole,
+            relationType: plan.relationType,
+            extracted: withZugferdTaxIdentity(guided.counterparty, zugferd, plan.counterpartyRole),
+          },
+        ];
       }
     }
   } else if (plan.mode === "open") {
@@ -834,6 +864,16 @@ async function processOcrDocument(
       }
     : modelInvoice;
 
+  // decisions/0080, phase 2: the tax fields, ZUGFeRD first, field by field, then the
+  // consistency flag over the merged figures. Only for an invoice-shaped document: a plain
+  // letter that happens to mention "reverse charge" gets no tax fields at all.
+  const taxFields = resolveDocumentTaxFields({
+    preferred: zugferd,
+    fallback: guided.invoice,
+    ocrText,
+    totalAmountCents: invoice?.totalAmountCents ?? null,
+  });
+
   // F3b (decisions/0025-payment-matching-wiring.md): `open` for an invoice-shaped document (a
   // direction was decided AND an amount was extracted), `not_applicable` for everything else
   // (a plain letter, a document whose direction stayed `unknown`, an invoice the model found
@@ -865,6 +905,7 @@ async function processOcrDocument(
       paymentIban: invoice?.paymentIban ?? null,
       paymentReference: invoice?.paymentReference ?? null,
       paidNote: invoice?.paidNote ?? null,
+      ...taxFields,
       kind,
       paymentStatus,
     });

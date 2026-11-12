@@ -20,6 +20,7 @@ import type { DocumentContactRole, ExtractedContactData } from "@/modules/contac
 import type { DocumentKind } from "@/modules/intake";
 
 import type { CounterpartyPlan } from "./party-roles";
+import type { ExtractedTaxFields } from "./tax-fields";
 
 /** One OCR-detected block on a page, paragraph-level, in reading order. Coordinates are in
  * the page's own pixel space (`OcrPage.dimensions`), top-left origin, matching Mistral OCR's
@@ -89,7 +90,12 @@ export type InvoiceFields = {
   /** Free text printed on the document itself, e.g. "bezahlt per Kreditkarte" - never
    * inferred, only carried through when the source text actually says so. */
   paidNote: string | null;
-};
+} & ExtractedTaxFields;
+// decisions/0080-ledger-double-entry-bookkeeping.md, phase 2: `ExtractedTaxFields`
+// (`./tax-fields.ts`) adds the per-rate breakdown, net/tax totals, pass-through amount,
+// reverse-charge flag and service date/period, parsed from the printed text like
+// `totalAmountCents`. The supplier's VAT id and country are not invoice fields: they are the
+// counterparty's own `vatId`/`country` (`ExtractedContactData`), stored on the linked contact.
 
 /** The workspace's own company profile, as far as it is known, handed to the analyzer so its
  * system prompt can tell it "das sind wir" (decisions/0021-extraction-direction-and-invoice-fields.md)

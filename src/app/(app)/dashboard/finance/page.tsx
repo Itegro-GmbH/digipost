@@ -6,6 +6,7 @@ import { PERMISSIONS } from "@/platform/access";
 import { requireWorkspaceMember } from "@/platform/access/server";
 import { listAccountsOverviewProjection, listPendingAccountDocumentsProjection } from "@/modules/accounts/server";
 import { CreateAccountSection, PendingAccountsSection } from "@/modules/accounts/client";
+import { isLedgerEnabledProjection } from "@/modules/ledger/server";
 
 function formatIban(iban: string | null): string {
   if (!iban) return "–";
@@ -36,13 +37,16 @@ export default async function FinancePage() {
   const access = await requireWorkspaceMember();
   if (!access.permissions.includes(PERMISSIONS.financeRead)) notFound();
 
-  const [t, accounts, pendingDocuments] = await Promise.all([
+  const canManage = access.permissions.includes(PERMISSIONS.financeManage);
+  const [t, tLedger, accounts, pendingDocuments, ledgerEnabled] = await Promise.all([
     getTranslations("Finance"),
+    getTranslations("Ledger.discover"),
     listAccountsOverviewProjection(access.workspace.id),
     listPendingAccountDocumentsProjection(access.workspace.id),
+    // decisions/0080: the ledger is internal and off by default, so its nav section is hidden
+    // until an admin turns it on. This one quiet link is where an admin finds it meanwhile.
+    canManage ? isLedgerEnabledProjection(access.workspace.id) : Promise.resolve(true),
   ]);
-
-  const canManage = access.permissions.includes(PERMISSIONS.financeManage);
 
   return (
     <div className="flex flex-col gap-6">
@@ -106,6 +110,13 @@ export default async function FinancePage() {
           ))}
         </ul>
       )}
+
+      {canManage && !ledgerEnabled ? (
+        <Link href="/dashboard/buchhaltung" className="flex flex-col gap-0.5 rounded-lg border border-dashed border-border p-3 hover:bg-muted">
+          <span className="text-sm font-medium text-foreground">{tLedger("title")}</span>
+          <span className="text-xs text-muted-foreground">{tLedger("hint")}</span>
+        </Link>
+      ) : null}
     </div>
   );
 }

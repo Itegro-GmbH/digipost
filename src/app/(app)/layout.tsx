@@ -1,5 +1,7 @@
+import { PERMISSIONS } from "@/platform/access";
 import { requireWorkspaceMember } from "@/platform/access/server";
 import { listWorkspacesProjection } from "@/modules/workspaces/server";
+import { countLedgerWaitingProposalsProjection, isLedgerEnabledProjection } from "@/modules/ledger/server";
 import { DashboardShell } from "@/modules/dashboard-shell/client";
 
 // Every page below depends on the session cookie; never attempt static prerendering
@@ -21,10 +23,20 @@ export const dynamic = "force-dynamic";
  * workspace switcher's list. It is read here, not inside `requireWorkspaceMember()`: which
  * workspace the caller may act in is an authorization decision, which workspaces they could
  * switch to is `src/modules/workspaces`' read model, and only this shell needs it.
+ *
+ * The ledger (decisions/0080-ledger-double-entry-bookkeeping.md) is enabled per workspace:
+ * for a caller with `finance.read` this reads whether it is on (the "Buchhaltung" nav section)
+ * and how many proposals wait for review (the "Zu prüfen" badge). Display only; every ledger
+ * page checks both again itself.
  */
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const access = await requireWorkspaceMember();
-  const workspaces = await listWorkspacesProjection(access.user.id);
+  const canReadFinance = access.permissions.includes(PERMISSIONS.financeRead);
+  const [workspaces, ledgerEnabled] = await Promise.all([
+    listWorkspacesProjection(access.user.id),
+    canReadFinance ? isLedgerEnabledProjection(access.workspace.id) : Promise.resolve(false),
+  ]);
+  const ledgerProposals = ledgerEnabled ? await countLedgerWaitingProposalsProjection(access.workspace.id) : 0;
 
   return (
     <DashboardShell
@@ -33,6 +45,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       activeWorkspaceId={access.workspace.id}
       workspaces={workspaces.map(({ id, name }) => ({ id, name }))}
       permissions={access.permissions}
+      features={ledgerEnabled ? ["ledger"] : []}
+      navBadges={{ ledgerProposals }}
     >
       {children}
     </DashboardShell>

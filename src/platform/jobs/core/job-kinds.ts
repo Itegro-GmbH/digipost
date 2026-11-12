@@ -55,5 +55,11 @@ export const JOB_KINDS = {
   /** decisions/0075-email-intake.md: the admin's "a mail was rejected" e-mail, enqueued (at
    * most once per workspace and reason per 24 hours) by the `process-inbound-email` handler. */
   sendMailIntakeNotification: "send-mail-intake-notification",
+  /** decisions/0080-ledger-double-entry-bookkeeping.md, phase 3: runs the ledger's proposal
+   * engine (`LedgerUseCases.syncProposals`) for one workspace with the ledger enabled, scheduled
+   * (`scheduleNow`, so a burst of triggers leaves one queued run) after every `match-payments`
+   * and `match-settlement-lines` run. Idempotent: proposals are keyed by source and an unchanged
+   * one is kept, so a retried or duplicated run writes nothing new. */
+  ledgerSync: "ledger-sync",
 } as const;
 export type JobKind = (typeof JOB_KINDS)[keyof typeof JOB_KINDS];

@@ -9,7 +9,12 @@ Maintenance triggers:
 - Repository-wide safety or workflow rules change
 - STRUCTURE.md or the structure checker lands and changes what is machine-enforced
 - Documentation governance rules in DOC_RULES.md change
-Last verified: 2026-11-05, decisions/0079-outgoing-invoices.md: added the `src/modules/invoicing`
+Last verified: 2026-11-12, decisions/0080-ledger-double-entry-bookkeeping.md phase 3 (proposal
+engine): `ledger_booking_advice` added to the ledger's tables, the AI booking advisor to the
+"Mistral and personal data" rule, and the ledger's read-only sources (settlement lines, issued
+invoices) to its owner bullet. Previously 2026-11-12, decisions/0080 (stage 1): added the
+`src/modules/ledger` owner, its tables to "only the owning module writes", and the "Filed periods
+are locked" rule. Previously 2026-11-05, decisions/0079-outgoing-invoices.md: added the `src/modules/invoicing`
 owner, its tables to "only the owning module writes", and the "Issued invoices are append-only"
 rule. Previously 2026-11-03, decisions/0078-mcp-server.md: added the `src/modules/mcp` owner, the
 MCP server under "Workspace scoping" (not an exception: the token's user, `resolveAccess`), and
@@ -112,6 +117,16 @@ detail; `decisions/README.md` indexes the ADR behind each one):
   invoice, the archive ZIP; every member may write invoices (`invoices.manage`, both roles); each
   issued invoice also becomes an inbox document through `DocumentUseCases.createForIssuedInvoice`,
   decisions/0079-outgoing-invoices.md.
+- `src/modules/ledger` - the internal double-entry books (decisions/0080-ledger-double-entry-bookkeeping.md),
+  enabled per workspace (`ledger_settings`, off by default) and admin-only end to end like the
+  other finance owners (`finance.read`/`finance.manage`): the SKR 04 chart, journal entries with
+  tax codes and a revision per change, open-item matches, booking rules, filings that lock their
+  period, handovers to the tax advisor and her uploaded balance lists, the reports and controls.
+  It reads `accounts`/`transactions`/`import_batches`/`settlement_lines`/`documents`/`contacts`/
+  `invoices`/`payment_aliases`/`payment_no_document_rules` read-only (through their owners' read
+  methods or read joins) and never books the synthetic transactions on clearing `accounts` rows.
+  Its proposal engine (phase 3, `syncProposals`, the `ledger-sync` job) only ever writes
+  `proposed` entries keyed by source and never touches a booked, edited or dismissed one.
 - `src/modules/dashboard-shell`, `src/modules/sign-in`, `src/platform/auth`,
   `src/platform/mailer`, `src/platform/api-pipeline`, `src/platform/observability`,
   `src/platform/env`, `src/persistence`, `src/shared/ui-primitives`, `src/i18n` - the
@@ -183,7 +198,11 @@ Digipost-specific invariants a change must not silently break:
   `src/modules/accounts`), and `document_transactions`/`payment_aliases`/
   `payment_rejections`/`payment_no_document_rules`/`payment_arbiter_answers` (owner: `src/modules/payments`), and
   `invoice_drafts`/`invoice_number_sequences`/`invoices`/`invoice_events` (owner:
-  `src/modules/invoicing`) as to any other table.
+  `src/modules/invoicing`), and `ledger_settings`/`ledger_accounts`/`journal_entries`/
+  `journal_lines`/`journal_entry_revisions`/`ledger_open_item_matches`/
+  `ledger_open_item_match_lines`/`ledger_booking_rules`/`ledger_filings`/`ledger_handovers`/
+  `ledger_advisor_balances`/`ledger_advisor_balance_lines`/`ledger_booking_advice` (owner:
+  `src/modules/ledger`) as to any other table.
 - **Issued invoices are append-only (GoBD).** A row in `invoices` or `invoice_events` is inserted
   once and never updated or deleted; a correction is a cancellation, i.e. a NEW numbered invoice
   pointing at the original (decisions/0079-outgoing-invoices.md). The database enforces it (a
@@ -193,6 +212,17 @@ Digipost-specific invariants a change must not silently break:
   tables, a foreign key from them with `on delete set null`/`cascade` to anything but
   `workspaces`, or a second way to allocate a number (`allocateSequence`, inside the issuing
   transaction, is what keeps the range gapless).
+- **Filed periods are locked; a booked entry balances.** A booked journal entry dated inside the
+  period of a submitted filing (a USt-VA's period, every day of an annual statement's year) can be
+  neither changed nor deleted, and nothing can be booked into that period; a submitted filing
+  itself is frozen. The database enforces it (`src/persistence/sql/ledger_filing_lock/`), with
+  exactly two exceptions: a workspace deletion's cascade, and entries tied to a draft correcting
+  filing ("Berichtigte Meldung"). A booked entry's lines sum to zero, checked by a deferred
+  constraint trigger at commit (`src/persistence/sql/ledger_balanced_entries/`). Every change to
+  an entry writes a revision; changing a booked one needs a reason. Never add a foreign key with
+  `on delete set null`/`cascade` from a ledger table to a source table (a document, a
+  transaction, a contact, a user): it would be an UPDATE the lock refuses; keep plain uuids
+  (decisions/0080-ledger-double-entry-bookkeeping.md).
 - **Nothing is auto-deleted except one thing.** A rejected intake proposal ("Ablehnen" -
   nothing was ever imported from it) older than 30 days is the ONLY row this product ever
   deletes without a human acting on it directly (`GET /api/cron/purge-rejected-intake`,
@@ -226,7 +256,11 @@ Digipost-specific invariants a change must not silently break:
   through this pipeline is explicitly blocked on that paperwork landing first
   (decisions/0016-processing-pipeline-and-ai.md's "Data protection note", README.md's
   "Before going to production"). Do not treat "the fake adapter works in tests" as
-  evidence the real integration is compliance-ready. The same applies to Resend as the
+  evidence the real integration is compliance-ready. The ledger's AI booking advisor
+  (decisions/0080 phase 3, `src/platform/mistral/server/mistral-ledger-booking-advisor.ts`) falls
+  under the same rule; it is sent only a document's extracted fields (sender, country, VAT id,
+  title, summary, amounts, tax breakdown, invoice number) and the workspace's chart, never the
+  OCR text, and must stay that way. The same applies to Resend as the
   receiver of the E-Mail-Eingang (`src/platform/inbound-mail`, decisions/0075-email-intake.md):
   incoming mail (sender, subject, body, attachments) passes through and is stored by Resend,
   no DPA with Resend exists yet and its data residency is unclear, so real customer mail

@@ -15,7 +15,9 @@ Maintenance triggers:
 - A new vendor SDK or a new sensitive env var is introduced
 - `scripts/structure/**` gains or loses a rule (keep the rule table and the
   ```structure block names in 1:1 correspondence, enforced by the checker itself)
-Last verified: 2026-11-05, decisions/0079-outgoing-invoices.md added `src/modules/invoicing` as a
+Last verified: 2026-11-12, decisions/0080-ledger-double-entry-bookkeeping.md added `src/modules/ledger`
+as a new owner under the existing container rules (no new vendor SDK, env var or root). Previously,
+2026-11-05, decisions/0079-outgoing-invoices.md added `src/modules/invoicing` as a
 new owner under the existing container rules, and named `@itegro/einvoice` among the unrestricted
 general-purpose libraries in §11. Previously, 2026-11-03, decisions/0078-mcp-server.md added `src/modules/mcp` as a new owner
 under the existing container rule, the `vendor-sdk` rows `@better-auth/` (confined to

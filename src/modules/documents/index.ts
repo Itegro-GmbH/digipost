@@ -22,6 +22,20 @@ export type {
 export { documentDisplayName, documentNameSource, type DocumentNameParts } from "./core/display-name";
 export { MAX_GUIDED_PARTIES, validateAnalysisResult, validateGuidedAnalysisResult } from "./core/analysis-validation";
 export { inferCurrency, parseGermanAmountToCents } from "./core/amount-parsing";
+// decisions/0080-ledger-double-entry-bookkeeping.md, phase 2: the tax fields' parsing, the
+// reverse-charge note detection, the consistency check and the ZUGFeRD/model merge, all pure.
+export {
+  checkTaxConsistency,
+  detectReverseChargeNote,
+  EMPTY_TAX_FIELDS,
+  parseTaxRatePercent,
+  resolveDocumentTaxFields,
+  TAX_CHECK_ISSUES,
+  TAX_CHECK_TOLERANCE_CENTS,
+  toTaxBreakdown,
+  type ExtractedTaxFields,
+  type TaxCheckIssue,
+} from "./core/tax-fields";
 // C2 (decisions/0021-extraction-direction-and-invoice-fields.md): pure direction decision and
 // linking-role resolution, used by `src/persistence/use-cases/documents-use-cases.ts`'s
 // `processDocument` and unit-tested independently of any database.

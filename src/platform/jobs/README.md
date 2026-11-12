@@ -56,7 +56,8 @@ from each owning module's own use-case methods ("handlers registered where they 
 - `core/job-kinds.ts` - `JOB_KINDS` (`"process-document"`, `"send-quota-warning"`,
   `"import-account-transactions"`, `"match-payments"`, `"match-settlement-lines"`,
   `"cleanup-workspace-storage"`, `"purge-rejected-intake"` - F5 added those two -,
-  `"process-inbound-email"`, `"send-mail-intake-notification"` - decisions/0075-email-intake.md) - the
+  `"process-inbound-email"`, `"send-mail-intake-notification"` - decisions/0075-email-intake.md -,
+  `"ledger-sync"` - decisions/0080-ledger-double-entry-bookkeeping.md phase 3) - the
   literal values are also stored in the `jobs.kind` database column, so renaming one needs a
   data migration, not just a code change.
 - `core/errors.ts` - `TransientJobError`/`PermanentJobError`, both carrying a stable `code`.

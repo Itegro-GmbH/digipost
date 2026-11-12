@@ -11,12 +11,13 @@ import { z } from "zod";
 import { DOCUMENT_CONTACT_ROLES, type DocumentContactRole, type ExtractedContactData } from "@/modules/contacts";
 
 import { inferCurrency, parseGermanAmountToCents } from "./amount-parsing";
+import { isPlausibleIsoDate } from "./iso-date";
 import type { CounterpartyPlan } from "./party-roles";
 import type { AnalysisResult, ExtractedParty, GuidedAnalysisResult, InvoiceFields } from "./ports";
+import { toExtractedTaxFields } from "./tax-fields";
 
 const TITLE_MAX_LENGTH = 120;
 const SUMMARY_MAX_LENGTH = 300;
-const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Field length caps for a per-party extraction - the same caps
  * `@/modules/contacts`'s `manualContactCreateSchema` enforces for a human-entered contact
@@ -68,14 +69,6 @@ const rawAnalysisSchema = z.object({
   parties: z.unknown().optional(),
   invoice: z.unknown().optional(),
 });
-
-function isPlausibleIsoDate(value: string): boolean {
-  if (!ISO_DATE_RE.test(value)) return false;
-  const [year, month, day] = value.split("-").map(Number) as [number, number, number];
-  if (year < 1900 || year > 2100) return false;
-  const date = new Date(Date.UTC(year, month - 1, day));
-  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
-}
 
 function toStringOrNull(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -193,9 +186,13 @@ function toInvoiceFields(raw: unknown): InvoiceFields | null {
     paymentIban: toClampedOrNull(record.paymentIban, 34),
     paymentReference: toClampedOrNull(record.paymentReference, 140),
     paidNote: toClampedOrNull(record.paidNote, 200),
+    // decisions/0080, phase 2: the tax fields, parsed from the printed text the same way.
+    ...toExtractedTaxFields(record),
   };
 
-  const hasAnyValue = Object.values(invoice).some((value) => value !== null);
+  // `reverseCharge: false` alone is not invoice-shaped data (the model answers it for any
+  // document it was asked about), so it does not keep an otherwise empty invoice alive.
+  const hasAnyValue = Object.values(invoice).some((value) => value !== null && value !== false);
   return hasAnyValue ? invoice : null;
 }
 

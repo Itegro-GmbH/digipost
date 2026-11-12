@@ -273,6 +273,26 @@ export function createFakeTransactionRepository(
       }
     },
 
+    // decisions/0080: bank rows only; no transfer-group partner bookkeeping in the fake (proved
+    // against real Postgres in `ledger-sync.db.test.ts`).
+    async listForLedger(workspaceId) {
+      return rows
+        .filter((r) => r.workspaceId === workspaceId && accountTypeById.get(r.accountId) === "bank")
+        .sort((a, b) => a.bookingDate.localeCompare(b.bookingDate) || a.id.localeCompare(b.id))
+        .map((r) => ({
+          id: r.id,
+          accountId: r.accountId,
+          bookingDate: r.bookingDate,
+          amountCents: r.amountCents,
+          currency: r.currency ?? "EUR",
+          counterpartyName: r.counterpartyName,
+          counterpartyIban: r.counterpartyIban,
+          remittanceText: r.remittanceText,
+          noDocumentNeeded: r.noDocumentNeeded,
+          pairedClearing: null,
+        }));
+    },
+
     async findUnpairedBankMatch(workspaceId, candidate) {
       const bankTransactions = rows.filter(
         (r) => r.workspaceId === workspaceId && accountTypeById.get(r.accountId) === "bank" && r.transferGroupId === null,
@@ -343,6 +363,22 @@ export function createFakeSettlementLineRepository(seed: SettlementLineRow[] = [
 
     async listUnpairedPayoutLines() {
       return [];
+    },
+
+    async listForLedger(workspaceId) {
+      return rows
+        .filter((r) => r.workspaceId === workspaceId)
+        .map((r) => ({
+          id: r.id,
+          sourceDocumentId: r.sourceDocumentId,
+          platform: null,
+          type: r.type,
+          grossCents: r.grossCents,
+          feeCents: r.feeCents,
+          netCents: r.netCents,
+          currency: r.currency,
+          bookingDate: r.bookingDate,
+        }));
     },
   };
 

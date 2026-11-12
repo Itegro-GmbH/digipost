@@ -14,7 +14,12 @@ Maintenance triggers:
 - The header's content or the mobile-nav breakpoint changes
 - The workspace switcher's list, ordering, or entries change
 - A nav entry needs to be hidden from members who lack a permission
-Last verified: 2026-10-22, decisions/0075-email-intake.md: "E-Mail-Eingang" is a real link to
+- A nav entry depends on a per-workspace feature, shows a count, or a page needs the wide layout
+Last verified: 2026-11-12, decisions/0080-ledger-double-entry-bookkeeping.md UI part 2: the
+"Buchhaltung" section gained Konten, Auswertungen and Einstellungen (same gate). Previously
+2026-11-12, decisions/0080: the "Buchhaltung" section (Übersicht, Zu prüfen, Journal), the first entries gated by a per-workspace `feature`
+(`ledger`) as well as a permission; the "Zu prüfen" count badge; `core/layout.ts`'s wide-layout
+opt-out for `/dashboard/buchhaltung/**`. Previously 2026-10-22, decisions/0075-email-intake.md: "E-Mail-Eingang" is a real link to
 `/dashboard/email-intake`. Previously 2026-10-03, decisions/0070-several-workspaces-per-user.md: the sidebar's and
 mobile header's plain workspace name became `ui/workspace-switcher.tsx`, listing every
 workspace the signed-in user belongs to, marking the active one, and offering "Weitere Firma
@@ -58,7 +63,7 @@ workspace name in.
 ## Public interfaces
 
 `client.ts` (`"use client"`): `DashboardShell({ userEmail, workspaceName, activeWorkspaceId,
-workspaces, permissions, children })`. No `actions.ts`, `server.ts`, or `index.ts`: this module owns no Server Actions
+workspaces, permissions, features?, navBadges?, children })`. No `actions.ts`, `server.ts`, or `index.ts`: this module owns no Server Actions
 or reads of its own (sign-out is `src/modules/sign-in`'s action, imported directly the same
 way `src/modules/workspaces`' UI imports its own actions) and nothing here needs a neutral
 entry point.
@@ -89,7 +94,22 @@ entry point.
   authorization always happens server-side on the page/action itself, `src/platform/access`'s
   own README. `activeNavHref` resolves the active entry as the longest `href` matching the
   current path at a segment boundary, which also marks the nearest ancestor for a page with no
-  entry of its own (`/dashboard/documents/<id>` marks "Posteingang").
+  entry of its own (`/dashboard/documents/<id>` marks "Posteingang"). The optional `feature`
+  field (`NAV_FEATURES`, today only `ledger`) hides an entry unless the layout reports that
+  per-workspace feature as on (`visibleNavSections(permissions, sections, features)`); the
+  "Buchhaltung" section (decisions/0080-ledger-double-entry-bookkeeping.md: `/dashboard/buchhaltung`
+  "Übersicht", `/dashboard/buchhaltung/zu-pruefen` "Zu prüfen", `/dashboard/buchhaltung/konten`
+  "Konten", `/dashboard/buchhaltung/journal` "Journal", `/dashboard/buchhaltung/auswertungen`
+  "Auswertungen", `/dashboard/buchhaltung/einstellungen` "Einstellungen"; the longest-prefix rule
+  marks an account sheet as "Konten" and every report or settings tab as its entry) needs both `finance.read` and `feature: "ledger"`, so an admin of a workspace that
+  never enabled the ledger sees no such section. The optional `badge` field (`NAV_BADGES`) names
+  a count the layout supplies (`ledgerProposals`, the proposals waiting for review); zero shows
+  nothing, and the number has a screen-reader text (`DashboardShell.nav.badge`).
+- `core/layout.ts` - `WIDE_LAYOUT_PREFIXES` and `usesWideLayout(pathname)`: the shell's
+  `<main>` is `max-w-3xl`; a page under one of these prefixes (today `/dashboard/buchhaltung`,
+  whose journal, account sheets, review queue and two-column editor are tables) gets
+  `max-w-6xl` instead. The smallest change that lets a page opt out: one list, matched at a
+  segment boundary like `activeNavHref`, no per-page layout of its own.
 - `ui/nav-links.tsx` - the sections themselves, active-state aware (`usePathname` plus
   `activeNavHref`) and filtered through `visibleNavSections` before rendering; shared between
   the desktop sidebar and the mobile panel so they can never drift apart. A labelled section is
@@ -120,7 +140,8 @@ entry point.
   height and `sticky` has nowhere to stick, which is why the sidebar used to scroll away on a
   long inbox. Its own `overflow-y-auto` keeps a nav taller than the viewport reachable. a header with a hamburger toggle below that breakpoint (app name plus
   workspace name there too), the toggled mobile nav panel, and the page content in a
-  centered `<main>`. Forwards its own `permissions` prop to both `NavLinks` instances.
+  centered `<main>` (wider under `WIDE_LAYOUT_PREFIXES`). Forwards its own `permissions`,
+  `features` and `navBadges` props to both `NavLinks` instances.
 
 ## Dependencies on other owners
 
@@ -136,13 +157,18 @@ dependency) for the hamburger/close glyphs and the section chevron.
 `DashboardShell` with `userEmail={access.user.email}`, `workspaceName={access.workspace.name}`,
 `activeWorkspaceId={access.workspace.id}`, `workspaces={...}` (from
 `listWorkspacesProjection(access.user.id)`, decisions/0070-several-workspaces-per-user.md),
-and `permissions={access.permissions}` around `{children}`.
+and `permissions={access.permissions}` around `{children}`. For a caller with `finance.read` it
+also reads `src/modules/ledger`'s `isLedgerEnabledProjection` and, when on,
+`countLedgerWaitingProposalsProjection`, and passes `features={["ledger"]}` and
+`navBadges={{ ledgerProposals }}`.
 
 ## Tests
 
 `tests/nav-items.test.ts` (unit): every entry's and every section heading's `labelKey` resolves
 in `de.json` (the P6 review finding: a nav item shipped with the raw message key as its label),
-no route is listed twice, every `/dashboard/finance` entry is gated behind `finance.read`, plus
+no route is listed twice, every `/dashboard/finance` entry is gated behind `finance.read`, every
+`/dashboard/buchhaltung` entry behind `finance.read` and the `ledger` feature (hidden without
+either), `usesWideLayout`'s prefix match, plus
 `activeNavHref`'s longest-match rule, `visibleNavSections`' empty-section removal, and
 `sectionTarget`/`activeSectionKey` (decisions/0057-sections-are-disclosures.md: which entry a
 heading goes to, and which section starts open for a given path).

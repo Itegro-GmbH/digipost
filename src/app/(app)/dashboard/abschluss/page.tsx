@@ -4,6 +4,7 @@ import { getTranslations } from "next-intl/server";
 
 import { closingPeriodOptions, currentClosingPeriod, parseClosingPeriod } from "@/modules/closing";
 import { getClosingReportProjection } from "@/modules/closing/server";
+import { isLedgerEnabledProjection } from "@/modules/ledger/server";
 import { PERMISSIONS } from "@/platform/access";
 import { requireWorkspaceMember } from "@/platform/access/server";
 
@@ -36,7 +37,12 @@ export default async function AbschlussPage({ searchParams }: PageProps<"/dashbo
   const todayIso = new Date().toISOString().slice(0, 10);
   const period = parseClosingPeriod(firstParam(rawParams.period)) ?? currentClosingPeriod(todayIso);
 
-  const [t, report] = await Promise.all([getTranslations("Closing"), getClosingReportProjection(access.workspace.id, period)]);
+  const [t, tLedger, report, ledgerEnabled] = await Promise.all([
+    getTranslations("Closing"),
+    getTranslations("Ledger.discover"),
+    getClosingReportProjection(access.workspace.id, period),
+    isLedgerEnabledProjection(access.workspace.id),
+  ]);
 
   const options = closingPeriodOptions(todayIso, PERIOD_OPTIONS);
   const monthFormatter = new Intl.DateTimeFormat("de", { month: "long", year: "numeric" });
@@ -44,9 +50,17 @@ export default async function AbschlussPage({ searchParams }: PageProps<"/dashbo
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-xl font-semibold text-foreground">{t("heading")}</h1>
-        <p className="text-sm text-muted-foreground">{t("description")}</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold text-foreground">{t("heading")}</h1>
+          <p className="text-sm text-muted-foreground">{t("description")}</p>
+        </div>
+        {/* decisions/0080: workspaces that keep their books in Digipost get one link there. */}
+        {ledgerEnabled ? (
+          <Link href="/dashboard/buchhaltung" className="text-sm text-foreground underline underline-offset-4">
+            {tLedger("toLedger")}
+          </Link>
+        ) : null}
       </div>
 
       <form method="get" className="flex flex-wrap items-end gap-3">

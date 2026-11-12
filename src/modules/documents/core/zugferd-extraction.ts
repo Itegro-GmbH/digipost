@@ -8,6 +8,9 @@
 // (`@/modules/intake`) still gates every parse, so a malicious embedded XML is rejected the
 // same way a malicious standalone upload is.
 import { parseXmlSafely, UnsafeXmlError } from "@/modules/intake";
+import type { DocumentTaxBreakdownEntry } from "@/persistence/repositories/contracts";
+
+import type { ExtractedTaxFields } from "./tax-fields";
 
 export type ZugferdExtraction = {
   invoiceNumber: string | null;
@@ -20,7 +23,14 @@ export type ZugferdExtraction = {
   paymentIban: string | null;
   sellerName: string | null;
   buyerName: string | null;
-};
+  /** decisions/0080, phase 2: each party's VAT id (`SpecifiedTaxRegistration/ID` with
+   * `schemeID="VA"`) and country (`PostalTradeAddress/CountryID`). The use case hands the
+   * counterparty's pair to the contact link when the model found none. */
+  sellerVatId: string | null;
+  sellerCountry: string | null;
+  buyerVatId: string | null;
+  buyerCountry: string | null;
+} & ExtractedTaxFields;
 
 type XmlObject = Record<string, unknown>;
 
@@ -56,7 +66,9 @@ function childText(node: unknown, path: string[]): string | null {
  * fractional part or a thousands-free integer amount. `null` for anything that does not look
  * like a plain decimal number. */
 function decimalTextToCents(text: string): number | null {
-  const match = /^-?\d+(\.\d{1,2})?$/.exec(text.trim());
+  // More than two fraction digits only when the extra ones are zeros (`107.8800`): anything
+  // finer than a cent is not an amount this application stores.
+  const match = /^-?\d+(\.\d{1,2}0*)?$/.exec(text.trim());
   if (!match) return null;
   const [wholePart = "0", fractionPart = ""] = text.trim().replace("-", "").split(".");
   const magnitude = Number(wholePart) * 100 + Number(`${fractionPart}00`.slice(0, 2));
@@ -97,6 +109,106 @@ function ramText(node: unknown, path: string[]): string | null {
   return textOf(current);
 }
 
+/** A `udt:DateTimeString` child (with or without its conventional prefix). */
+function dateTimeText(node: unknown): string | null {
+  if (!isXmlObject(node)) return null;
+  return textOf(node["udt:DateTimeString"] ?? node["DateTimeString"]);
+}
+
+/** A repeated XML element is an array after parsing, a single one is not. */
+function asList(node: unknown): unknown[] {
+  if (node === undefined || node === null) return [];
+  return Array.isArray(node) ? node : [node];
+}
+
+function attributeOf(node: unknown, name: string): string | null {
+  if (!isXmlObject(node)) return null;
+  const value = node[`@_${name}`];
+  return typeof value === "string" ? value.trim() : null;
+}
+
+function decimalOrNull(text: string | null): number | null {
+  return text ? decimalTextToCents(text) : null;
+}
+
+/** The party's VAT id among its tax registrations (`schemeID="VA"`; `"FC"` is the national tax
+ * number, not a VAT id). */
+function partyVatId(party: unknown): string | null {
+  for (const registration of asList(ramChild(party, "SpecifiedTaxRegistration"))) {
+    const idNode = ramChild(registration, "ID");
+    if (attributeOf(idNode, "schemeID") === "VA") return textOf(idNode);
+  }
+  return null;
+}
+
+function partyCountry(party: unknown): string | null {
+  const country = ramText(party, ["PostalTradeAddress", "CountryID"]);
+  return country && /^[A-Za-z]{2}$/.test(country) ? country.toUpperCase() : null;
+}
+
+/** `RateApplicablePercent` is plain decimal text (`19`, `19.00`, `7`). */
+function ratePercentOf(text: string | null): number | null {
+  if (!text || !/^\d{1,3}(\.\d+)?$/.test(text.trim())) return null;
+  const value = Number(text.trim());
+  return value >= 0 && value <= 100 ? Math.round(value * 100) / 100 : null;
+}
+
+/** `TaxTotalAmount` may repeat once per currency (EN 16931 BT-110/BT-111): the invoice
+ * currency's one is the tax total, any other is an accounting-currency figure. */
+function taxTotalCentsOf(monetarySummation: unknown, currency: string | null): number | null {
+  const totals = asList(ramChild(monetarySummation, "TaxTotalAmount"));
+  const inInvoiceCurrency = totals.find((node) => {
+    const nodeCurrency = attributeOf(node, "currencyID");
+    return nodeCurrency === null || currency === null || nodeCurrency === currency;
+  });
+  return decimalOrNull(textOf(inInvoiceCurrency));
+}
+
+/**
+ * The tax half of a CII invoice (decisions/0080, phase 2): one breakdown entry per
+ * `ApplicableTradeTax` (its `RateApplicablePercent`, `BasisAmount`, `CalculatedAmount`), the
+ * header's `TaxBasisTotalAmount`/`TaxTotalAmount`, reverse charge when any category is `AE`
+ * (EN 16931's "VAT reverse charge"), and the service date (`ActualDeliverySupplyChainEvent`) or
+ * billing period (`BillingSpecifiedPeriod`). Structured data, so no consistency doubts beyond
+ * the ones `checkTaxConsistency` still runs on it.
+ */
+function extractTaxFields(transaction: unknown, settlement: unknown, currency: string | null): ExtractedTaxFields {
+  const taxBreakdown: DocumentTaxBreakdownEntry[] = [];
+  const categories: string[] = [];
+  for (const tax of asList(ramChild(settlement, "ApplicableTradeTax"))) {
+    const category = ramText(tax, ["CategoryCode"]);
+    if (category) categories.push(category.toUpperCase());
+    // A category with no rate (e.g. `AE`/`O`, which may omit it) still has rate 0 by definition.
+    const ratePercent = ratePercentOf(ramText(tax, ["RateApplicablePercent"])) ?? (category ? 0 : null);
+    if (ratePercent === null) continue;
+    const netCents = decimalOrNull(ramText(tax, ["BasisAmount"]));
+    const taxCents = decimalOrNull(ramText(tax, ["CalculatedAmount"]));
+    if (netCents === null && taxCents === null) continue;
+    taxBreakdown.push({ ratePercent, netCents, taxCents });
+  }
+
+  const monetarySummation = ramChild(settlement, "SpecifiedTradeSettlementHeaderMonetarySummation");
+  const delivery = ramChild(transaction, "ApplicableHeaderTradeDelivery");
+  const serviceDateRaw = dateTimeText(ramChild(ramChild(delivery, "ActualDeliverySupplyChainEvent"), "OccurrenceDateTime"));
+  const period = ramChild(settlement, "BillingSpecifiedPeriod");
+  const periodFromRaw = dateTimeText(ramChild(period, "StartDateTime"));
+  const periodToRaw = dateTimeText(ramChild(period, "EndDateTime"));
+
+  return {
+    taxBreakdown: taxBreakdown.length > 0 ? taxBreakdown : null,
+    netTotalCents: decimalOrNull(ramText(monetarySummation, ["TaxBasisTotalAmount"])),
+    taxTotalCents: taxTotalCentsOf(monetarySummation, currency),
+    // CII has no "durchlaufende Posten" concept of its own.
+    passThroughCents: null,
+    // Only a stated category decides: `AE` present is reverse charge, categories without `AE`
+    // are not, and an XML with no tax category at all says nothing.
+    reverseCharge: categories.length === 0 ? null : categories.includes("AE"),
+    serviceDate: serviceDateRaw ? toIsoDate(serviceDateRaw) : null,
+    servicePeriodFrom: periodFromRaw ? toIsoDate(periodFromRaw) : null,
+    servicePeriodTo: periodToRaw ? toIsoDate(periodToRaw) : null,
+  };
+}
+
 /**
  * Extracts invoice fields from an embedded ZUGFeRD/Factur-X/XRechnung CII invoice XML.
  * Returns `null` when the XML is not a recognizable CII invoice at all, or when it carries
@@ -130,8 +242,10 @@ export function extractZugferdInvoiceFields(xmlText: string): ZugferdExtraction 
   const agreement = ramChild(transaction, "ApplicableHeaderTradeAgreement");
   const settlement = ramChild(transaction, "ApplicableHeaderTradeSettlement");
 
-  const sellerName = ramText(agreement, ["SellerTradeParty", "Name"]);
-  const buyerName = ramText(agreement, ["BuyerTradeParty", "Name"]);
+  const seller = ramChild(agreement, "SellerTradeParty");
+  const buyer = ramChild(agreement, "BuyerTradeParty");
+  const sellerName = ramText(seller, ["Name"]);
+  const buyerName = ramText(buyer, ["Name"]);
 
   const currency = ramText(settlement, ["InvoiceCurrencyCode"]);
   const paymentIban = ramText(settlement, ["SpecifiedTradeSettlementPaymentMeans", "PayeePartyCreditorFinancialAccount", "IBANID"]);
@@ -147,5 +261,18 @@ export function extractZugferdInvoiceFields(xmlText: string): ZugferdExtraction 
   const hasAnyField = Boolean(invoiceNumber || totalAmountCents !== null || sellerName || buyerName);
   if (!hasAnyField) return null;
 
-  return { invoiceNumber, totalAmountCents, currency, dueDate, paymentIban, sellerName, buyerName };
+  return {
+    invoiceNumber,
+    totalAmountCents,
+    currency,
+    dueDate,
+    paymentIban,
+    sellerName,
+    buyerName,
+    sellerVatId: partyVatId(seller),
+    sellerCountry: partyCountry(seller),
+    buyerVatId: partyVatId(buyer),
+    buyerCountry: partyCountry(buyer),
+    ...extractTaxFields(transaction, settlement, currency),
+  };
 }

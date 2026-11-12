@@ -11,14 +11,27 @@ import type { InferSelectModel } from "drizzle-orm";
 import type { DocumentKind, SettlementPlatform } from "@/modules/intake";
 import type { PaymentStatus } from "@/modules/payments";
 import type { DateRange } from "@/shared/date-range";
-import type { documents, DocumentDirection, DocumentIntakeStatus, DocumentStatus } from "@/persistence/schema/documents";
+import type {
+  documents,
+  DocumentDirection,
+  DocumentIntakeStatus,
+  DocumentStatus,
+  DocumentTaxBreakdownEntry,
+  DocumentTaxCheck,
+} from "@/persistence/schema/documents";
 
 // Re-exported (type AND runtime value) so code outside `src/persistence/` - which may only
 // import through this "persistence-entry" contracts door, never `schema/**` directly
 // (STRUCTURE.md's `direction` rule) - can still reference the status enum, e.g. for a
 // `<select>`'s option list or a query-param schema.
-export { DOCUMENT_DIRECTIONS, DOCUMENT_INTAKE_STATUSES, DOCUMENT_STATUSES } from "@/persistence/schema/documents";
-export type { DocumentDirection, DocumentIntakeStatus, DocumentStatus } from "@/persistence/schema/documents";
+export { DOCUMENT_DIRECTIONS, DOCUMENT_INTAKE_STATUSES, DOCUMENT_STATUSES, DOCUMENT_TAX_CHECK_RESULTS } from "@/persistence/schema/documents";
+export type {
+  DocumentDirection,
+  DocumentIntakeStatus,
+  DocumentStatus,
+  DocumentTaxBreakdownEntry,
+  DocumentTaxCheck,
+} from "@/persistence/schema/documents";
 // F1b (decisions/0020-universal-intake.md): the intake recognizer's own taxonomy, re-exported
 // here purely so a consumer that already imports document types from this one contracts door
 // does not also need a second import from `@/modules/intake` for the same value - both are
@@ -79,7 +92,27 @@ export type CreateIssuedInvoiceDocumentRow = CreateDocumentRow & {
   paymentReference: string;
   paymentStatus: PaymentStatus;
 };
-export type MarkDocumentDoneInput = {
+/** decisions/0080-ledger-double-entry-bookkeeping.md, phase 2: the tax data a booking needs,
+ * as `markDone` writes it and `listForLedger` reads it back. Every field is `null` when the
+ * document does not print it (and for every document processed before phase 2). */
+export type DocumentTaxFields = {
+  /** One entry per printed VAT rate; `null` when no breakdown is printed. */
+  taxBreakdown: DocumentTaxBreakdownEntry[] | null;
+  netTotalCents: number | null;
+  taxTotalCents: number | null;
+  /** "Durchlaufende Posten" / "Auslagen ohne USt". */
+  passThroughCents: number | null;
+  reverseCharge: boolean | null;
+  /** ISO `YYYY-MM-DD`. */
+  serviceDate: string | null;
+  servicePeriodFrom: string | null;
+  servicePeriodTo: string | null;
+  /** Computed in code from the printed figures (`@/modules/documents`'s `checkTaxConsistency`),
+   * by the use case, never by this repository. */
+  taxCheck: DocumentTaxCheck | null;
+};
+
+export type MarkDocumentDoneInput = DocumentTaxFields & {
   ocrText: string;
   ocrBlocks: unknown;
   title: string | null;
@@ -279,6 +312,51 @@ export type DocumentSummaryRow = {
   createdAt: Date;
 };
 
+/** decisions/0080, phase 2: one confirmed payment link of a document, as the ledger books it. */
+export type LedgerDocumentLinkedTransaction = {
+  transactionId: string;
+  /** The positive portion of the transaction this document claims
+   * (`document_transactions.allocated_amount_cents`). */
+  allocatedAmountCents: number;
+};
+
+/** decisions/0080, phase 2: one row of `listForLedger`, everything the ledger's proposal engine
+ * needs to book a document, and nothing it does not (no OCR text, no blocks, no intake payload).
+ * The contact is the counterparty this document's direction implies: the `sender` link of an
+ * incoming document, the `recipient` link of an outgoing one (the same rule `list`'s
+ * `counterpartyName` uses); the supplier's VAT id and country come from that contact rather
+ * than from a column of the document's own. */
+export type LedgerDocumentRow = DocumentTaxFields & {
+  id: string;
+  /** `manual_kind` when a human set one (decisions/0072), else the classified `kind`. */
+  kind: DocumentKind;
+  direction: DocumentDirection | null;
+  status: DocumentStatus;
+  /** ISO `YYYY-MM-DD`; `null` when the document prints none. */
+  documentDate: string | null;
+  /** ISO `YYYY-MM-DD`: the shared effective date (decisions/0058/0060/0061) that `from`/`to`
+   * filter on. */
+  effectiveDate: string;
+  title: string | null;
+  sender: string | null;
+  /** The extracted one-paragraph summary (never the OCR text): what the ledger's AI advisor may
+   * be told about the document. */
+  summary: string | null;
+  originalFileName: string;
+  invoiceNumber: string | null;
+  totalAmountCents: number | null;
+  currency: string | null;
+  platform: SettlementPlatform | null;
+  /** The EFFECTIVE status (an open document past its due date reads `overdue`). */
+  paymentStatus: string;
+  contactId: string | null;
+  contactName: string | null;
+  contactVatId: string | null;
+  contactCountry: string | null;
+  /** Oldest booking first; `[]` when nothing is confirmed. */
+  confirmedTransactions: LedgerDocumentLinkedTransaction[];
+};
+
 export type ListDocumentsResult = {
   items: DocumentListRow[];
   /** Whether a page after this one has at least one more matching row - offset pagination
@@ -406,4 +484,9 @@ export interface DocumentRepository {
    * documents is bounded by what one small business receives in a year (see
    * `src/modules/closing/README.md`'s own note on the practical size limit). */
   listForPeriod(workspaceId: string, from: string, to: string): Promise<ClosingDocumentRow[]>;
+  /** decisions/0080-ledger-double-entry-bookkeeping.md, phase 2: every document of the workspace
+   * the ledger may book, oldest first by the shared effective date, optionally bounded by
+   * inclusive ISO `from`/`to` (either may be absent). Includes every status and kind: which of
+   * them gets an entry is the ledger's decision, not this read's. */
+  listForLedger(workspaceId: string, from?: string, to?: string): Promise<LedgerDocumentRow[]>;
 }

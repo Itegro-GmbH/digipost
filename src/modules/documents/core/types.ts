@@ -3,7 +3,7 @@
 import type { DocumentContactRole } from "@/modules/contacts";
 import type { DocumentKind, SettlementPlatform } from "@/modules/intake";
 import type { PaymentStatus } from "@/modules/payments";
-import type { DocumentDirection, DocumentIntakeStatus, DocumentStatus } from "@/persistence/repositories/contracts";
+import type { DocumentDirection, DocumentIntakeStatus, DocumentStatus, DocumentTaxFields } from "@/persistence/repositories/contracts";
 
 import type { IntakeResult } from "./intake-result";
 
@@ -55,7 +55,9 @@ export type DocumentListView = {
   page: number;
 };
 
-export type DocumentDetailView = {
+/** decisions/0080-ledger-double-entry-bookkeeping.md, phase 2: the detail view carries the tax
+ * fields read-only, in the same shape the repository stores them. */
+export type DocumentDetailView = DocumentTaxFields & {
   id: string;
   title: string | null;
   originalFileName: string;

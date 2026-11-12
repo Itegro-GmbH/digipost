@@ -262,3 +262,57 @@ describe("buildGuidedOpenSystemPrompt", () => {
     expect(prompt).toContain("DOCUMENT_TEXT");
   });
 });
+
+// decisions/0080-ledger-double-entry-bookkeeping.md, phase 2: every analyzer prompt asks for the
+// same tax fields, as printed text, and forbids computing a missing one.
+describe("the invoice block's tax fields", () => {
+  const derivedPlan: Extract<CounterpartyPlan, { mode: "derived" }> = {
+    mode: "derived",
+    ourRole: "recipient",
+    counterpartyRole: "sender",
+    relationType: "supplier",
+  };
+  const prompts = {
+    ungated: buildAnalyzerSystemPrompt(OWN_COMPANY),
+    derived: buildGuidedDerivedSystemPrompt(OWN_COMPANY, "incoming_invoice", derivedPlan),
+    open: buildGuidedOpenSystemPrompt(OWN_COMPANY, "reminder", { mode: "open" }),
+  };
+
+  const TAX_KEYS = [
+    '"netTotalAmount"',
+    '"taxTotalAmount"',
+    '"taxBreakdown"',
+    '"rate"',
+    '"netAmount"',
+    '"taxAmount"',
+    '"passThroughAmount"',
+    '"reverseCharge"',
+    '"serviceDate"',
+    '"servicePeriodFrom"',
+    '"servicePeriodTo"',
+  ];
+
+  it.each(Object.entries(prompts))("the %s prompt asks for every tax field", (_name, prompt) => {
+    for (const key of TAX_KEYS) expect(prompt).toContain(key);
+  });
+
+  it.each(Object.entries(prompts))("the %s prompt asks for printed text and forbids computing a missing tax amount", (_name, prompt) => {
+    expect(prompt).toContain("Nettobetrag zu diesem Steuersatz GENAU wie gedruckt");
+    expect(prompt).toContain("Berechne niemals einen fehlenden Netto- oder Steuerbetrag selbst");
+    expect(prompt).toContain("Steuerschuldnerschaft des Leistungsempfängers");
+    expect(prompt).toContain("durchlaufender Posten");
+  });
+
+  it("keeps the existing invoice fields in the same block", () => {
+    for (const prompt of Object.values(prompts)) {
+      expect(prompt).toContain('"totalAmount"');
+      expect(prompt).toContain('"paidNote"');
+    }
+  });
+
+  it("asks for the counterparty's own VAT id and country rather than a second supplier field", () => {
+    expect(prompts.derived).toContain('"vatId"');
+    expect(prompts.derived).toContain('"country"');
+    expect(prompts.derived).not.toContain("supplierVatId");
+  });
+});

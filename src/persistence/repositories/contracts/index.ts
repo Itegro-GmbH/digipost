@@ -22,6 +22,7 @@ import type { DocumentRepository } from "./documents-repository";
 import type { IntakeFingerprintRepository } from "./intake-fingerprints-repository";
 import type { InvoiceRepository } from "./invoices-repository";
 import type { JobsRepository } from "./jobs-repository";
+import type { LedgerRepository } from "./ledger-repository";
 import type { MailIntakeRepository } from "./mail-intake-repository";
 import type {
   DocumentTransactionRepository,
@@ -52,7 +53,7 @@ export type {
   WorkspaceRepository,
   WorkspaceRow,
 } from "./workspaces-repository";
-export { DOCUMENT_DIRECTIONS, DOCUMENT_INTAKE_STATUSES, DOCUMENT_KINDS, DOCUMENT_STATUSES } from "./documents-repository";
+export { DOCUMENT_DIRECTIONS, DOCUMENT_INTAKE_STATUSES, DOCUMENT_KINDS, DOCUMENT_STATUSES, DOCUMENT_TAX_CHECK_RESULTS } from "./documents-repository";
 export type {
   ClosingDocumentCounts,
   ClosingDocumentRow,
@@ -67,6 +68,11 @@ export type {
   DocumentStatus,
   DocumentWithRelations,
   DocumentSummaryRow,
+  DocumentTaxBreakdownEntry,
+  DocumentTaxCheck,
+  DocumentTaxFields,
+  LedgerDocumentLinkedTransaction,
+  LedgerDocumentRow,
   ListDocumentsFilter,
   ListDocumentsResult,
   MarkDocumentDoneInput,
@@ -117,6 +123,8 @@ export type {
   CreditDebitIndicator,
   ImportBatchRepository,
   ImportBatchRow,
+  LedgerSettlementLineRow,
+  LedgerTransactionRow,
   SettlementLineRepository,
   SettlementLineRow,
   SettlementLineType,
@@ -146,6 +154,36 @@ export type {
   InvoiceRow,
   InvoiceWithCounterpart,
 } from "./invoices-repository";
+export type {
+  BankAccountSourceRow,
+  BankTransactionMovementRow,
+  CreateBookingRuleRow,
+  CreateFilingRow,
+  CreateJournalEntryRow,
+  CreateJournalLineRow,
+  CreateLedgerAccountRow,
+  CreateRevisionRow,
+  JournalEntryFilter,
+  JournalEntryPatch,
+  JournalEntryRevisionRow,
+  JournalEntryRow,
+  JournalLineRow,
+  JournalLineWithAccount,
+  LedgerAccountPatch,
+  LedgerAccountRow,
+  LedgerAdvisorBalanceLineRow,
+  LedgerAdvisorBalanceRow,
+  LedgerBookingRuleRow,
+  LedgerEntryCounts,
+  LedgerFilingRow,
+  LedgerHandoverRow,
+  LedgerOpenItemMatchRow,
+  LedgerReportLineRow,
+  LedgerRepository,
+  LedgerSettingsPatch,
+  LedgerSettingsRow,
+  SourceKeyRow,
+} from "./ledger-repository";
 export type {
   CreateDocumentTransactionRow,
   DecideDocumentTransactionInput,
@@ -188,6 +226,8 @@ export type Repositories = {
   mailIntake: MailIntakeRepository;
   /** decisions/0079-outgoing-invoices.md, owner `src/modules/invoicing`. */
   invoice: InvoiceRepository;
+  /** decisions/0080-ledger-double-entry-bookkeeping.md, owner `src/modules/ledger`. */
+  ledger: LedgerRepository;
   // … one entry per repository
 };
 

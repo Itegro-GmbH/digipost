@@ -20,6 +20,7 @@ import { createDrizzleDocumentRepository } from "./documents-repository";
 import { createDrizzleIntakeFingerprintRepository } from "./intake-fingerprints-repository";
 import { createDrizzleInvoiceRepository } from "./invoices-repository";
 import { createDrizzleJobsRepository } from "./jobs-repository";
+import { createDrizzleLedgerRepository } from "./ledger-repository";
 import { createDrizzleMailIntakeRepository } from "./mail-intake-repository";
 import {
   createDrizzleDocumentTransactionRepository,
@@ -59,5 +60,6 @@ export function createDrizzleRepositories(db: DbExecutor): Repositories {
     paymentArbiterAnswer: createDrizzlePaymentArbiterAnswerRepository(db),
     mailIntake: createDrizzleMailIntakeRepository(db),
     invoice: createDrizzleInvoiceRepository(db),
+    ledger: createDrizzleLedgerRepository(db),
   };
 }

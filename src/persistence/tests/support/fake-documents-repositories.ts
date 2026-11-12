@@ -41,6 +41,15 @@ export function documentRow(overrides: Partial<DocumentRow> & Pick<DocumentRow, 
     paymentIban: null,
     paymentReference: null,
     paidNote: null,
+    taxBreakdown: null,
+    netTotalCents: null,
+    taxTotalCents: null,
+    passThroughCents: null,
+    reverseCharge: null,
+    serviceDate: null,
+    servicePeriodFrom: null,
+    servicePeriodTo: null,
+    taxCheck: null,
     paymentStatus: "not_applicable",
     paidAt: null,
     createdAt: new Date(0),
@@ -231,6 +240,15 @@ export function createFakeDocumentRepository(
       row.paymentIban = input.paymentIban;
       row.paymentReference = input.paymentReference;
       row.paidNote = input.paidNote;
+      row.taxBreakdown = input.taxBreakdown;
+      row.netTotalCents = input.netTotalCents;
+      row.taxTotalCents = input.taxTotalCents;
+      row.passThroughCents = input.passThroughCents;
+      row.reverseCharge = input.reverseCharge;
+      row.serviceDate = input.serviceDate;
+      row.servicePeriodFrom = input.servicePeriodFrom;
+      row.servicePeriodTo = input.servicePeriodTo;
+      row.taxCheck = input.taxCheck;
       row.kind = input.kind;
       row.paymentStatus = input.paymentStatus;
       row.paidAt = null;
@@ -365,6 +383,49 @@ export function createFakeDocumentRepository(
           // No link bookkeeping in the fake: the export's cross references are proved
           // against real Postgres (`closing-repository.db.test.ts`) and, in the module
           // itself, against literal rows (`src/modules/closing/tests/export.test.ts`).
+          confirmedTransactions: [],
+        }));
+    },
+
+    // decisions/0080: same approximation of the effective date as above; no contact or link
+    // bookkeeping in the fake (proved against real Postgres in `documents-repository.db.test.ts`).
+    async listForLedger(workspaceId, from, to) {
+      const todayIso = new Date().toISOString().slice(0, 10);
+      return rows
+        .filter((r) => r.workspaceId === workspaceId && (from === undefined || fakeEffectiveDate(r) >= from) && (to === undefined || fakeEffectiveDate(r) <= to))
+        .sort((a, b) => fakeEffectiveDate(a).localeCompare(fakeEffectiveDate(b)) || a.id.localeCompare(b.id))
+        .map((r) => ({
+          id: r.id,
+          kind: r.manualKind ?? r.kind,
+          direction: r.direction,
+          status: r.status,
+          documentDate: r.documentDate,
+          effectiveDate: fakeEffectiveDate(r),
+          title: r.title,
+          sender: r.sender,
+          summary: r.summary,
+          originalFileName: r.originalFileName,
+          invoiceNumber: r.invoiceNumber,
+          totalAmountCents: r.totalAmountCents,
+          currency: r.currency,
+          platform: r.platform,
+          paymentStatus:
+            (r.paymentStatus === "open" || r.paymentStatus === "partially_paid") && r.dueDate !== null && r.dueDate < todayIso
+              ? "overdue"
+              : r.paymentStatus,
+          taxBreakdown: r.taxBreakdown,
+          netTotalCents: r.netTotalCents,
+          taxTotalCents: r.taxTotalCents,
+          passThroughCents: r.passThroughCents,
+          reverseCharge: r.reverseCharge,
+          serviceDate: r.serviceDate,
+          servicePeriodFrom: r.servicePeriodFrom,
+          servicePeriodTo: r.servicePeriodTo,
+          taxCheck: r.taxCheck,
+          contactId: null,
+          contactName: null,
+          contactVatId: null,
+          contactCountry: null,
           confirmedTransactions: [],
         }));
     },

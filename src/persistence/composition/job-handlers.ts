@@ -28,6 +28,7 @@ import {
 import { UseCaseError } from "@/persistence/use-cases/errors";
 import type { BillingUseCases, SendQuotaWarningInput } from "@/persistence/use-cases/billing-use-cases";
 import type { JobHandlers } from "@/persistence/use-cases/jobs-use-cases";
+import { LEDGER_ERROR, type LedgerUseCases } from "@/persistence/use-cases/ledger-use-cases";
 import type { MailIntakeUseCases, ProcessInboundEmailInput, SendMailIntakeNotificationInput } from "@/persistence/use-cases/mail-intake-use-cases";
 import type { MatchPaymentsInput, MatchSettlementReportInput, PaymentsUseCases } from "@/persistence/use-cases/payments-use-cases";
 import type { WorkspaceUseCases } from "@/persistence/use-cases/workspaces-use-cases";
@@ -53,6 +54,19 @@ const cleanupWorkspaceStoragePayloadSchema = z.object({ prefix: z.string().min(1
 const purgeRejectedIntakePayloadSchema = z.object({ workspaceId: z.uuid(), documentId: z.uuid() });
 const processInboundEmailPayloadSchema = z.object({ workspaceId: z.uuid(), inboundEmailId: z.uuid() });
 const sendMailIntakeNotificationPayloadSchema = z.object({ workspaceId: z.uuid(), inboundEmailId: z.uuid(), reason: z.enum(NOTIFIED_REASONS) });
+const ledgerSyncPayloadSchema = z.object({ workspaceId: z.uuid() });
+
+/** decisions/0080 phase 3: a finished matching run is the moment new evidence exists for the
+ * ledger (a confirmed match, a new statement, a new report). Scheduling is deduplicated and a
+ * no-op while the ledger is off; a failure is logged, never thrown, so the matching job that
+ * already did its work is not retried for it. */
+async function scheduleLedgerSync(ledger: LedgerUseCases, workspaceId: string): Promise<void> {
+  try {
+    await ledger.scheduleSync(workspaceId);
+  } catch (err) {
+    console.error("[ledger] failed to schedule the proposal sync", { workspaceId, err: err instanceof Error ? err.name : "unknown" });
+  }
+}
 
 export function createJobHandlers(deps: {
   documents: DocumentUseCases;
@@ -61,6 +75,7 @@ export function createJobHandlers(deps: {
   accounts: AccountsUseCases;
   payments: PaymentsUseCases;
   mailIntake: MailIntakeUseCases;
+  ledger: LedgerUseCases;
   mailer: Mailer;
   objectStorage: ObjectStorage;
 }): JobHandlers {
@@ -107,6 +122,7 @@ export function createJobHandlers(deps: {
     [JOB_KINDS.matchPayments]: async (payload) => {
       const input: MatchPaymentsInput = matchPaymentsPayloadSchema.parse(payload);
       await deps.payments.runMatching(input);
+      await scheduleLedgerSync(deps.ledger, input.workspaceId);
     },
 
     // F4 (decisions/0026-platform-settlements.md): matches one confirmed settlement report's
@@ -116,6 +132,22 @@ export function createJobHandlers(deps: {
     [JOB_KINDS.matchSettlementLines]: async (payload) => {
       const input: MatchSettlementReportInput = matchSettlementLinesPayloadSchema.parse(payload);
       await deps.payments.matchSettlementReport(input);
+      await scheduleLedgerSync(deps.ledger, input.workspaceId);
+    },
+
+    // decisions/0080 phase 3: the ledger's proposal engine for one workspace. Idempotent (keyed
+    // by source, an unchanged proposal is kept, the AI's answers are cached per document), so a
+    // retried or duplicated run writes nothing new. A ledger switched off since scheduling is
+    // not a failure. Documents left over by the run's AI budget get one more run right away.
+    [JOB_KINDS.ledgerSync]: async (payload) => {
+      const input = ledgerSyncPayloadSchema.parse(payload);
+      try {
+        const result = await deps.ledger.syncProposals({ workspaceId: input.workspaceId });
+        if (result.deferred > 0) await scheduleLedgerSync(deps.ledger, input.workspaceId);
+      } catch (err) {
+        if (err instanceof UseCaseError && err.code === LEDGER_ERROR.disabled) return;
+        throw err;
+      }
     },
 
     // The 80% quota warning e-mail (P3, decisions/0017-billing-tiers-and-packages.md).

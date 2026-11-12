@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "journal_entry_revisions_entry_revision_key" ON "journal_entry_revisions" USING btree ("entry_ref","revision");

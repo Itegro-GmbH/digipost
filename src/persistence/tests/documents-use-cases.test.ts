@@ -5,7 +5,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createFakeObjectStorage } from "@/platform/object-storage/tests/support/fake-object-storage";
-import { createFakeOcrEngine, createFakeDocumentAnalyzer, type OcrEngine, type DocumentAnalyzer } from "@/modules/documents";
+import { createFakeOcrEngine, createFakeDocumentAnalyzer, EMPTY_TAX_FIELDS, type OcrEngine, type DocumentAnalyzer } from "@/modules/documents";
 import { createFakeIntakeClassifier, MT940_MIME_TYPE, sampleTabular, type IntakeClassifier } from "@/modules/intake";
 import { withUnusedRepositories } from "@/persistence/tests/support/unused-repositories";
 import { createFakeBillingRepository } from "@/persistence/tests/support/fake-billing-repositories";
@@ -468,6 +468,63 @@ describe("createDocumentUseCases", () => {
         expect(documentContactState).toEqual([expect.objectContaining({ documentId: doc.id, contactId: contactState[0]!.id, role: "sender" })]);
       });
 
+      // decisions/0080-ledger-double-entry-bookkeeping.md, phase 2.
+      it("stores the tax fields and a consistent tax check for the Telekom fixture", async () => {
+        const workspace = workspaceRow({ name: "Muster GmbH" });
+        const doc = documentRow({
+          workspaceId: workspace.id,
+          storageKey: `workspaces/${workspace.id}/documents/d1/original.pdf`,
+          originalFileName: "rechnung-telekom.pdf",
+        });
+        const { useCases, documentState, storage } = setup({ workspaces: [workspace], documents: [doc] });
+        await storage.putObject({ key: doc.storageKey, body: await pdfFixture(), contentType: "application/pdf" });
+
+        await useCases.processDocument({ workspaceId: workspace.id, documentId: doc.id });
+
+        const updated = documentState.find((d) => d.id === doc.id)!;
+        expect(updated).toMatchObject({
+          taxBreakdown: [{ ratePercent: 19, netCents: 4201, taxCents: 798 }],
+          reverseCharge: false,
+          servicePeriodFrom: "2026-03-01",
+          servicePeriodTo: "2026-03-31",
+          passThroughCents: null,
+          taxCheck: "consistent",
+        });
+      });
+
+      it("stores reverse charge for an invoice that prints the note", async () => {
+        const workspace = workspaceRow({ name: "Muster GmbH" });
+        const doc = documentRow({
+          workspaceId: workspace.id,
+          storageKey: `workspaces/${workspace.id}/documents/d1/original.pdf`,
+          originalFileName: "rechnung-reverse-charge.pdf",
+        });
+        const { useCases, documentState, storage, contactState } = setup({ workspaces: [workspace], documents: [doc] });
+        await storage.putObject({ key: doc.storageKey, body: await pdfFixture(), contentType: "application/pdf" });
+
+        await useCases.processDocument({ workspaceId: workspace.id, documentId: doc.id });
+
+        const updated = documentState.find((d) => d.id === doc.id)!;
+        expect(updated).toMatchObject({ kind: "incoming_invoice", reverseCharge: true, serviceDate: "2026-06-30", taxCheck: "consistent" });
+        expect(contactState[0]).toMatchObject({ name: "Werbeplattform Ireland Ltd", vatId: "IE9692928F" });
+      });
+
+      it("leaves every tax field null for a document that is not an invoice", async () => {
+        const workspace = workspaceRow({ name: "Muster GmbH" });
+        const doc = documentRow({
+          workspaceId: workspace.id,
+          storageKey: `workspaces/${workspace.id}/documents/d1/original.pdf`,
+          originalFileName: "vertrag.pdf",
+        });
+        const { useCases, documentState, storage } = setup({ workspaces: [workspace], documents: [doc] });
+        await storage.putObject({ key: doc.storageKey, body: await pdfFixture(), contentType: "application/pdf" });
+
+        await useCases.processDocument({ workspaceId: workspace.id, documentId: doc.id });
+
+        const updated = documentState.find((d) => d.id === doc.id)!;
+        expect(updated).toMatchObject({ taxBreakdown: null, netTotalCents: null, reverseCharge: null, serviceDate: null, taxCheck: null });
+      });
+
       it("does not duplicate the contact or the link when the same document is retried", async () => {
         const workspace = workspaceRow({ name: "Muster GmbH" });
         const pdfBytes = await pdfFixture();
@@ -606,6 +663,7 @@ describe("createDocumentUseCases", () => {
                 paymentIban: "DE89370400440532013000",
                 paymentReference: null,
                 paidNote: null,
+                ...EMPTY_TAX_FIELDS,
               },
               reminderDirection: null,
             };
@@ -674,7 +732,7 @@ describe("createDocumentUseCases", () => {
             summary: "Rechnung",
             counterparty: { name: "Musterfirma" },
             parties: [],
-            invoice: { invoiceNumber: "77", totalAmountCents: 5000, currency: "EUR", dueDate: null, paymentIban: null, paymentReference: null, paidNote: null },
+            invoice: { invoiceNumber: "77", totalAmountCents: 5000, currency: "EUR", dueDate: null, paymentIban: null, paymentReference: null, paidNote: null, ...EMPTY_TAX_FIELDS },
             reminderDirection: null,
           }),
         };
@@ -740,6 +798,7 @@ describe("createDocumentUseCases", () => {
               paymentIban: "DE12500105170648489890",
               paymentReference: null,
               paidNote: null,
+              ...EMPTY_TAX_FIELDS,
             },
             reminderDirection: "received",
           }),
@@ -795,7 +854,7 @@ describe("createDocumentUseCases", () => {
               summary: "Monatliche Auszahlung",
               counterparty: { name: "Stripe Payments Europe Ltd", addressLine1: "1 Grand Canal Street Lower", city: "Dublin" },
               parties: [],
-              invoice: { invoiceNumber: null, totalAmountCents: 124_900, currency: "EUR", dueDate: null, paymentIban: null, paymentReference: null, paidNote: null },
+              invoice: { invoiceNumber: null, totalAmountCents: 124_900, currency: "EUR", dueDate: null, paymentIban: null, paymentReference: null, paidNote: null, ...EMPTY_TAX_FIELDS },
               reminderDirection: null,
             }),
           };
@@ -883,6 +942,44 @@ describe("createDocumentUseCases", () => {
         expect(updated.kind).toBe("outgoing_invoice");
         expect(updated.direction).toBe("outgoing");
         expect(classifierClassify).not.toHaveBeenCalled();
+      });
+
+      // decisions/0080, phase 2: the XML's tax figures win over the model's, and the seller's VAT
+      // id and country reach the contact when the model found none.
+      it("takes the tax figures and the seller's VAT id from the CII XML", async () => {
+        const workspace = workspaceRow({ name: "Muster Werkstatt GmbH", companyVatId: "DE111222333" });
+        const doc = documentRow({
+          workspaceId: workspace.id,
+          storageKey: `workspaces/${workspace.id}/documents/d1/original.pdf`,
+          originalFileName: "zugferd-eingangsrechnung.pdf",
+        });
+        const { useCases, documentState, storage, contactState } = setup({ workspaces: [workspace], documents: [doc] });
+        const xml = ciiInvoiceXml("Muster Lieferant GmbH", "Muster Werkstatt GmbH")
+          .replace(
+            "<ram:SellerTradeParty><ram:Name>Muster Lieferant GmbH</ram:Name></ram:SellerTradeParty>",
+            `<ram:SellerTradeParty><ram:Name>Muster Lieferant GmbH</ram:Name><ram:PostalTradeAddress><ram:CountryID>AT</ram:CountryID></ram:PostalTradeAddress><ram:SpecifiedTaxRegistration><ram:ID schemeID="VA">ATU12345678</ram:ID></ram:SpecifiedTaxRegistration></ram:SellerTradeParty>`,
+          )
+          .replace(
+            "<ram:SpecifiedTradeSettlementHeaderMonetarySummation>",
+            `<ram:ApplicableTradeTax><ram:CalculatedAmount>7.98</ram:CalculatedAmount><ram:TypeCode>VAT</ram:TypeCode><ram:BasisAmount>42.02</ram:BasisAmount><ram:CategoryCode>S</ram:CategoryCode><ram:RateApplicablePercent>19</ram:RateApplicablePercent></ram:ApplicableTradeTax><ram:SpecifiedTradeSettlementHeaderMonetarySummation><ram:TaxBasisTotalAmount>42.02</ram:TaxBasisTotalAmount><ram:TaxTotalAmount currencyID="EUR">7.98</ram:TaxTotalAmount>`,
+          );
+        const pdfDoc = await PDFDocument.create();
+        pdfDoc.addPage([595.28, 841.89]);
+        await pdfDoc.attach(new TextEncoder().encode(xml), "factur-x.xml", { mimeType: "application/xml" });
+        await storage.putObject({ key: doc.storageKey, body: await pdfDoc.save(), contentType: "application/pdf" });
+
+        await useCases.processDocument({ workspaceId: workspace.id, documentId: doc.id });
+
+        const updated = documentState.find((d) => d.id === doc.id)!;
+        expect(updated).toMatchObject({
+          totalAmountCents: 5000,
+          taxBreakdown: [{ ratePercent: 19, netCents: 4202, taxCents: 798 }],
+          netTotalCents: 4202,
+          taxTotalCents: 798,
+          reverseCharge: false,
+          taxCheck: "consistent",
+        });
+        expect(contactState[0]).toMatchObject({ name: "Muster Lieferant GmbH", vatId: "ATU12345678", country: "AT" });
       });
 
       it("defaults to incoming_invoice when the CII seller name is not recognizably ours, no classifier call", async () => {

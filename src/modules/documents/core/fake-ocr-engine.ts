@@ -26,6 +26,26 @@ const FAKE_LETTER_RULES: FakeLetterRule[] = [
       "IBAN: DE12500105170648489890",
       "Rechnungsbetrag: 49,99 EUR",
       "Fälligkeitsdatum: 05.04.2026",
+      // decisions/0080, phase 2: the tax lines, after the due date so the first date in the
+      // text (the fake analyzer's document date) stays the same.
+      "Netto 19 %: 42,01 EUR",
+      "USt 19 %: 7,98 EUR",
+      "Leistungszeitraum: 01.03.2026 bis 31.03.2026",
+    ],
+  },
+  {
+    // decisions/0080, phase 2: a reverse-charge invoice from a supplier abroad (no German VAT,
+    // the recipient owes it), the shape of the owner's ad-platform invoices.
+    keywords: ["reverse-charge"],
+    sender: "Werbeplattform Ireland Ltd",
+    subject: "Rechnung",
+    extraLines: [
+      "Rechnungsnummer RC-2026-17",
+      "USt-IdNr.: IE9692928F",
+      "Rechnungsbetrag: 13,00 EUR",
+      "Netto 0 %: 13,00 EUR",
+      "Steuerschuldnerschaft des Leistungsempfängers (Reverse Charge)",
+      "Leistungsdatum: 30.06.2026",
     ],
   },
   {
