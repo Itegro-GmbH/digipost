@@ -1,0 +1,98 @@
+import "server-only";
+
+import { cache } from "react";
+
+import { getRequestServices } from "@/persistence/composition/request-services";
+import type { AdvisorComparisonView } from "@/persistence/use-cases/ledger-use-cases";
+
+import type { AccountSheet, BalanceList, OpenItems, Period, VatPreview } from "../core/reports";
+import type { ControlResult } from "../core/controls";
+import type { ListEntriesFilter } from "../core/schemas";
+import type {
+  AdvisorUploadView,
+  BookingRuleView,
+  FilingView,
+  HandoverView,
+  JournalEntryListItem,
+  JournalEntryView,
+  LedgerAccountView,
+  LedgerSettingsView,
+  OpenItemAccountSummary,
+  PeriodOverviewRow,
+} from "../core/types";
+
+// Projections for `/dashboard/buchhaltung/**` (decisions/0080-ledger-double-entry-bookkeeping.md).
+// `workspaceId` is always the caller's own resolved membership, never client input; the page
+// checks `finance.read` and `isLedgerEnabledProjection` before calling any other projection
+// (every one but the settings throws `disabled` while the ledger is off).
+
+export const getLedgerSettingsProjection = cache(async (workspaceId: string): Promise<LedgerSettingsView> => {
+  return getRequestServices().ledger.getSettings(workspaceId);
+});
+
+export const isLedgerEnabledProjection = cache(async (workspaceId: string): Promise<boolean> => {
+  return getRequestServices().ledger.isEnabled(workspaceId);
+});
+
+export const listLedgerAccountsProjection = cache(async (workspaceId: string): Promise<LedgerAccountView[]> => {
+  return getRequestServices().ledger.listAccounts(workspaceId);
+});
+
+/** `filter` is compared by reference by `cache()`; pass a fresh object per request. */
+export const listJournalEntriesProjection = cache(async (workspaceId: string, filter: ListEntriesFilter): Promise<JournalEntryListItem[]> => {
+  return getRequestServices().ledger.listEntries(workspaceId, filter);
+});
+
+export const getJournalEntryProjection = cache(async (workspaceId: string, entryId: string): Promise<JournalEntryView | null> => {
+  return getRequestServices().ledger.getEntry(workspaceId, entryId);
+});
+
+export const getLedgerBalancesProjection = cache(async (workspaceId: string, from: string, to: string): Promise<BalanceList> => {
+  return getRequestServices().ledger.getBalances(workspaceId, { from, to });
+});
+
+export const getLedgerAccountSheetProjection = cache(async (workspaceId: string, accountNumber: string, from: string, to: string): Promise<AccountSheet | null> => {
+  return getRequestServices().ledger.getAccountSheet(workspaceId, { accountNumber, from, to });
+});
+
+export const getLedgerOpenItemsProjection = cache(
+  async (workspaceId: string, accountNumber: string, asOf: string): Promise<(OpenItems & { account: LedgerAccountView }) | null> => {
+    return getRequestServices().ledger.getOpenItems(workspaceId, { accountNumber, asOf });
+  },
+);
+
+export const listLedgerOpenItemAccountsProjection = cache(async (workspaceId: string, asOf: string): Promise<OpenItemAccountSummary[]> => {
+  return getRequestServices().ledger.listOpenItemAccounts(workspaceId, asOf);
+});
+
+export const getLedgerVatPreviewProjection = cache(async (workspaceId: string, from: string, to: string): Promise<VatPreview> => {
+  return getRequestServices().ledger.getVatPreview(workspaceId, { from, to } satisfies Period);
+});
+
+export const getLedgerControlsProjection = cache(async (workspaceId: string, from: string, to: string): Promise<ControlResult[]> => {
+  return getRequestServices().ledger.getControls(workspaceId, { from, to });
+});
+
+export const getLedgerPeriodOverviewProjection = cache(async (workspaceId: string, year: number): Promise<PeriodOverviewRow[]> => {
+  return getRequestServices().ledger.getPeriodOverview(workspaceId, year);
+});
+
+export const listLedgerRulesProjection = cache(async (workspaceId: string): Promise<BookingRuleView[]> => {
+  return getRequestServices().ledger.listRules(workspaceId);
+});
+
+export const listLedgerFilingsProjection = cache(async (workspaceId: string): Promise<FilingView[]> => {
+  return getRequestServices().ledger.listFilings(workspaceId);
+});
+
+export const listLedgerHandoversProjection = cache(async (workspaceId: string): Promise<HandoverView[]> => {
+  return getRequestServices().ledger.listHandovers(workspaceId);
+});
+
+export const listLedgerAdvisorUploadsProjection = cache(async (workspaceId: string): Promise<AdvisorUploadView[]> => {
+  return getRequestServices().ledger.listAdvisorUploads(workspaceId);
+});
+
+export const getLedgerAdvisorComparisonProjection = cache(async (workspaceId: string, uploadId: string): Promise<AdvisorComparisonView | null> => {
+  return getRequestServices().ledger.getAdvisorComparison(workspaceId, uploadId);
+});
