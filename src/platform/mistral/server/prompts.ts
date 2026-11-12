@@ -36,20 +36,9 @@ const DOCUMENT_TEXT_LABEL = "DOCUMENT_TEXT";
 const TAX_RULE =
   " Das gilt auch für Steuerbeträge: Berechne niemals einen fehlenden Netto- oder Steuerbetrag selbst, sondern setze ihn auf null.";
 
-/** The `"invoice"` block of every analyzer prompt (the ungated `SYSTEM_PROMPT` and both guided
- * prompts), kept as one constant so the three JSON contracts cannot drift apart from each other
- * or from `core/analysis-validation.ts`'s `toInvoiceFields`/`core/tax-fields.ts`'s
- * `toExtractedTaxFields`. Every amount is the printed text, never a number the model computed
- * (decisions/0021); the tax fields are decisions/0080-ledger-double-entry-bookkeeping.md's
- * phase 2. */
-const INVOICE_JSON_FIELDS = `    "invoiceNumber": "<Rechnungsnummer oder null>",
-    "totalAmount": "<Rechnungsbetrag GENAU wie im Dokument gedruckt, z. B. \\"1.083,68 EUR\\", oder null>",
-    "currency": "<ISO-4217-Code, z. B. EUR, oder null>",
-    "dueDate": "<Fälligkeitsdatum im Format YYYY-MM-DD oder null>",
-    "paymentIban": "<IBAN für die Zahlung oder null>",
-    "paymentReference": "<Verwendungszweck oder null>",
-    "paidNote": "<Vermerk auf dem Dokument, z. B. \\"bezahlt per Kreditkarte\\", oder null>",
-    "netTotalAmount": "<Nettobetrag gesamt GENAU wie gedruckt, z. B. \\"107,88 EUR\\", oder null>",
+/** The tax part of the `"invoice"` block (decisions/0080 phase 2), also the whole answer of the
+ * tax field backfill's prompt (`buildTaxFieldsSystemPrompt`). */
+const TAX_JSON_FIELDS = `    "netTotalAmount": "<Nettobetrag gesamt GENAU wie gedruckt, z. B. \\"107,88 EUR\\", oder null>",
     "taxTotalAmount": "<Umsatzsteuer/MwSt. gesamt GENAU wie gedruckt, oder null>",
     "taxBreakdown": [
       {
@@ -63,6 +52,21 @@ const INVOICE_JSON_FIELDS = `    "invoiceNumber": "<Rechnungsnummer oder null>",
     "serviceDate": "<Leistungsdatum/Lieferdatum im Format YYYY-MM-DD oder null>",
     "servicePeriodFrom": "<Beginn des Leistungszeitraums im Format YYYY-MM-DD oder null>",
     "servicePeriodTo": "<Ende des Leistungszeitraums im Format YYYY-MM-DD oder null>"`;
+
+/** The `"invoice"` block of every analyzer prompt (the ungated `SYSTEM_PROMPT` and both guided
+ * prompts), kept as one constant so the three JSON contracts cannot drift apart from each other
+ * or from `core/analysis-validation.ts`'s `toInvoiceFields`/`core/tax-fields.ts`'s
+ * `toExtractedTaxFields`. Every amount is the printed text, never a number the model computed
+ * (decisions/0021); the tax fields are decisions/0080-ledger-double-entry-bookkeeping.md's
+ * phase 2. */
+const INVOICE_JSON_FIELDS = `    "invoiceNumber": "<Rechnungsnummer oder null>",
+    "totalAmount": "<Rechnungsbetrag GENAU wie im Dokument gedruckt, z. B. \\"1.083,68 EUR\\", oder null>",
+    "currency": "<ISO-4217-Code, z. B. EUR, oder null>",
+    "dueDate": "<Fälligkeitsdatum im Format YYYY-MM-DD oder null>",
+    "paymentIban": "<IBAN für die Zahlung oder null>",
+    "paymentReference": "<Verwendungszweck oder null>",
+    "paidNote": "<Vermerk auf dem Dokument, z. B. \\"bezahlt per Kreditkarte\\", oder null>",
+${TAX_JSON_FIELDS}`;
 
 const SYSTEM_PROMPT = `Du bist ein Assistent, der eingehende und ausgehende Geschäftspost für ein deutsches Kleinunternehmen analysiert.
 Du erhältst den per OCR erkannten Text eines gescannten Briefs. Deine Aufgabe ist es, wichtige Angaben zu extrahieren, einschließlich aller auf dem Dokument genannten Firmen/Institutionen (Parteien) und - falls es sich um eine Rechnung, Mahnung oder Quittung handelt - der Rechnungsangaben.
@@ -108,6 +112,23 @@ ${INVOICE_JSON_FIELDS}
 }
 
 Nenne höchstens 3 Parteien, die wichtigsten zuerst. Gib niemals eigene Berechnungen für Beträge an - gib den Betrag exakt so wieder, wie er im Dokument steht, inklusive Tausender- und Dezimaltrennzeichen.${TAX_RULE}`;
+
+/** The tax field backfill's system prompt (`DocumentAnalyzer.extractTaxFields`): only the tax
+ * figures of an invoice that was already analyzed once, as printed text, at the top level of the
+ * answer. The field list and its wording are `INVOICE_JSON_FIELDS`' tax part, so the parser
+ * (`toExtractedTaxFields`) reads both answers the same way. */
+const TAX_FIELDS_SYSTEM_PROMPT = `Du liest aus dem per OCR erkannten Text einer Rechnung, Quittung oder eines Bescheids eines deutschen Kleinunternehmens ausschließlich die Steuerangaben aus. Alle anderen Angaben des Dokuments sind bereits bekannt und werden nicht gebraucht.
+
+Antworte ausschließlich mit einem JSON-Objekt exakt in dieser Form, ohne zusätzlichen Text:
+{
+${TAX_JSON_FIELDS}
+}
+
+Gib niemals eigene Berechnungen für Beträge an - gib den Betrag exakt so wieder, wie er im Dokument steht, inklusive Tausender- und Dezimaltrennzeichen.${TAX_RULE}`;
+
+export function buildTaxFieldsSystemPrompt(): string {
+  return `${TAX_FIELDS_SYSTEM_PROMPT}\n\n${describeGuardedSection(DOCUMENT_TEXT_LABEL)}`;
+}
 
 function formatOwnCompanyBlock(ownCompany: OwnCompanyContext): string {
   if (!ownCompany) {

@@ -29,3 +29,4 @@ export { RuleForm, RulesSettings, type RuleContactOption } from "./ui/rules-sett
 export { ReportsTabs, SettingsTabs, type ReportTab, type SettingsTab } from "./ui/section-tabs";
 export { SettingsGeneralForm } from "./ui/settings-general";
 export { VatPreviewView, type VatEntryRef } from "./ui/vat-preview-view";
+export { TaxBackfillCard, type TaxBackfillAction } from "./ui/tax-backfill-card";

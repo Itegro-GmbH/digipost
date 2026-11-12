@@ -3,7 +3,7 @@
 // `src/persistence/use-cases/accounts-use-cases.ts` and this module's own `actions.ts`/`ui/`.
 export type { ImportableStatement, ImportableTransaction, ImportOutcome } from "./core/types";
 export { mapCamt053StatementsToImportable, mapTabularRowsToImportable, summarizeStatementsForBatch } from "./core/mapping";
-export { buildSettlementLineDrafts, type SettlementLineDraft, type SettlementLineType } from "./core/settlement-lines";
+export { buildSettlementLineDrafts, settlementFeeEffectCents, type SettlementLineDraft, type SettlementLineType } from "./core/settlement-lines";
 export { computeBalanceMismatch } from "./core/reconciliation";
 export { resolveAccountByIban, type ExistingAccountForResolution } from "./core/account-resolution";
 export { findCoverageGaps, type CoverageGap, type StatementRange } from "./core/coverage";

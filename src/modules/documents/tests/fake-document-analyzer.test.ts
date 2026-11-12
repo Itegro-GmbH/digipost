@@ -242,3 +242,21 @@ function extractIban(text: string): string | null {
   const match = text.match(/IBAN:\s*([A-Z0-9 ]+)/i);
   return match?.[1]?.trim().replace(/\s+/g, "") ?? null;
 }
+
+// The tax field backfill: the fake reads the same printed tax lines as `analyzeGuided`.
+describe("createFakeDocumentAnalyzer.extractTaxFields", () => {
+  it("reads the printed tax lines of the Telekom fixture, nothing else", async () => {
+    const analyzer = createFakeDocumentAnalyzer();
+    const text = ["Telekom Deutschland GmbH", "Rechnung", "Rechnungsbetrag: 49,99 EUR", "Netto 19 %: 42,01 EUR", "USt 19 %: 7,98 EUR", "Leistungszeitraum: 01.03.2026 bis 31.03.2026"].join("\n");
+    expect(await analyzer.extractTaxFields({ text, fileName: "telekom.pdf" })).toEqual({
+      taxBreakdown: [{ ratePercent: 19, netCents: 4201, taxCents: 798 }],
+      netTotalCents: null,
+      taxTotalCents: null,
+      passThroughCents: null,
+      reverseCharge: false,
+      serviceDate: null,
+      servicePeriodFrom: "2026-03-01",
+      servicePeriodTo: "2026-03-31",
+    });
+  });
+});

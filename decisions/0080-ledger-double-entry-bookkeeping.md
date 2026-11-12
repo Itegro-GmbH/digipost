@@ -15,7 +15,10 @@ Maintenance triggers:
 - The lock rule (what a filing freezes) changes
 - The existing clearing accounts (decisions/0026, decisions/0068) are migrated onto the ledger
 - The export format to the tax advisor is decided
-Last verified: 2026-11-12, fixes after the acceptance replay and an independent review: the 2970
+Last verified: 2026-11-12, "Notes after production use" added (Google fee refunds, the tax field
+backfill, no reverse charge guessed), against `src/modules/accounts/core/settlement-lines.ts`,
+`src/modules/ledger/core/proposals.ts` and `src/persistence/use-cases/documents-use-cases.ts`.
+Previously 2026-11-12, fixes after the acceptance replay and an independent review: the 2970
 carry-forward, the commissionaire-only settlement template, bank-transaction rules by remittance
 text and money direction, the correcting filing taken when booking into a locked period, and
 concurrent writers (migration `0033_flippant_mercury.sql`), against `src/modules/ledger/core/`,
@@ -339,3 +342,31 @@ the tax advisor's Summen- und Saldenliste. The expected differences are known (G
   a GmbH draws up a balance sheet.
 - Booking quality depends on the new extraction fields; until phase 2, proposals for an
   invoice without a tax breakdown fall back to the contact's rule and are flagged.
+
+## Notes after production use (2026-11)
+
+Reviewing Itegro's first booking proposals in production showed three problems. None changes a
+decision above; each is a correction within it.
+
+- **Google fee refunds.** A Google Play "Google fee refund" row was stored as a revenue line
+  (decisions/0052), so the settlement template booked revenue and fees both too high by the
+  refunded fee (July 2026: revenue 36,29 and fees 24,94 instead of 13,36 and 2,01; net 11,35
+  either way). The reader now makes it a fee line with its own positive sign; the template books
+  revenue as charges minus charge refunds and fees as fees minus refunded fees. Re-importing a
+  report ("Erneut importieren" on its document page) replaces the lines it now yields
+  differently, and the sync updates its untouched proposal (`src/modules/accounts/README.md`,
+  "Google fee refunds" and "Re-import").
+- **Tax fields for older documents.** Documents processed before phase 2 have no tax fields, so
+  their proposals guess. "Steuerdaten alter Belege nachträglich erkennen" (ledger settings,
+  "Allgemein") reads only the tax fields of up to 100 such invoices per click, ZUGFeRD first,
+  else the AI on the stored OCR text, each document once, never touching another field, and
+  schedules the sync afterwards (migration `0034_curvy_mongoose.sql`,
+  `src/modules/documents/README.md`, "Tax field backfill").
+- **No reverse charge guessed.** A foreign supplier's invoice without any printed tax figure and
+  without a reverse-charge note was booked as `rc13b` silently, although some foreign suppliers
+  (Apple Ireland, Finom) charge German VAT. Such a proposal now carries `tax_unverified` and is
+  never in the "Sicher" group; a rule with a tax code still decides on its own. The AI advisor's
+  prompt names the typical accounts (bank and payment-service fees on 6855, authority and court
+  fees on 6300 `not_taxable`, a notary on 6825 with pass-through fees) and asks for no tax code
+  rather than a guess (`src/modules/ledger/README.md`, "Proposal engine").
+

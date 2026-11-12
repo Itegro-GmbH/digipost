@@ -2008,7 +2008,8 @@
       "foreign_supplier_with_vat": "Ein ausländischer Anbieter berechnet deutsche Umsatzsteuer. Bitte prüfen Sie den Steuerschlüssel.",
       "duplicate_suspect": "Möglicherweise doppelt: Es gibt bereits eine ähnliche Buchung.",
       "ai_unavailable": "Die KI war nicht erreichbar. Der Vorschlag nutzt die Standardvorlage.",
-      "reverse_charge_conflict": "Der Beleg nennt die Steuerschuldnerschaft des Leistungsempfängers, weist aber deutsche Umsatzsteuer eines deutschen Anbieters aus. Gebucht ist die ausgewiesene Steuer. Bitte prüfen Sie den Beleg."
+      "reverse_charge_conflict": "Der Beleg nennt die Steuerschuldnerschaft des Leistungsempfängers, weist aber deutsche Umsatzsteuer eines deutschen Anbieters aus. Gebucht ist die ausgewiesene Steuer. Bitte prüfen Sie den Beleg.",
+      "tax_unverified": "Steuer nicht auf dem Beleg erkannt. Bitte prüfen, ob deutsche Umsatzsteuer ausgewiesen ist oder Reverse Charge gilt."
     },
     "problems": {
       "unsupported_platform_settlement": "Abrechnungen dieser Plattform werden nicht automatisch gebucht, nur die von Apple und Google. Bitte buchen Sie sie von Hand."
@@ -2247,7 +2248,8 @@
       "foreign_supplier_with_vat": "Ausland mit deutscher USt",
       "duplicate_suspect": "Möglicherweise doppelt",
       "ai_unavailable": "KI nicht erreichbar",
-      "reverse_charge_conflict": "§ 13b und deutsche USt"
+      "reverse_charge_conflict": "§ 13b und deutsche USt",
+      "tax_unverified": "Steuer nicht erkannt"
     },
     "lines": {
       "caption": "Buchungssatz",
@@ -2681,7 +2683,14 @@
       "disableHint": "Blendet die Buchhaltung für diesen Arbeitsbereich aus. Alle Buchungen, Konten und Meldungen bleiben gespeichert und sind wieder da, wenn Sie sie erneut aktivieren.",
       "disable": "Buchhaltung ausschalten",
       "disableConfirm": "Wirklich ausschalten? Es wird nichts gelöscht, aber bis zur erneuten Aktivierung schlägt Digipost keine Buchungen mehr vor.",
-      "disableSubmit": "Ja, ausschalten"
+      "disableSubmit": "Ja, ausschalten",
+      "taxBackfillHeading": "Steuerdaten alter Belege nachträglich erkennen",
+      "taxBackfillHint": "Belege, die vor der Erkennung von Steuersätzen verarbeitet wurden, haben keine Steueraufteilung. Dafür wird der bereits erkannte Text von bis zu {max} Rechnungen einmal an die KI geschickt; eingebettete E-Rechnungsdaten (ZUGFeRD) werden ohne KI gelesen. Nur die Steuerangaben werden ergänzt, nichts anderes am Beleg ändert sich, und unbearbeitete Vorschläge werden danach aktualisiert.",
+      "taxBackfillCandidates": "{count, plural, =0 {Keine älteren Belege ohne Steuerdaten.} one {# älterer Beleg ohne Steuerdaten.} other {# ältere Belege ohne Steuerdaten.}}",
+      "taxBackfill": "Steuerdaten nachträglich erkennen",
+      "taxBackfillQueued": "{count, plural, =0 {Es gibt keine Belege mehr, die ausgelesen werden müssen.} one {# Beleg wird nachträglich ausgelesen.} other {# Belege werden nachträglich ausgelesen.}}",
+      "taxBackfillRemaining": "{count, plural, one {Danach bleibt # Beleg für einen weiteren Durchgang.} other {Danach bleiben # Belege für einen weiteren Durchgang.}}",
+      "taxBackfillFailed": "Das hat nicht geklappt. Bitte versuchen Sie es erneut."
     },
     "chart": {
       "intro": "{count, plural, one {# Konto} other {# Konten}} nach SKR 04. Nummern ändern sich nie, damit Buchungen ihr Konto behalten.",

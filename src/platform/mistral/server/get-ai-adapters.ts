@@ -47,6 +47,9 @@ function createNotConfiguredAnalyzer(): DocumentAnalyzer {
     async analyzeGuided() {
       throw new MistralRequestError(MISTRAL_ERROR_CODES.notConfigured, false, "AI provider is not configured");
     },
+    async extractTaxFields() {
+      throw new MistralRequestError(MISTRAL_ERROR_CODES.notConfigured, false, "AI provider is not configured");
+    },
   };
 }
 

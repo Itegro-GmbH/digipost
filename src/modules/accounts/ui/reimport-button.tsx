@@ -10,8 +10,10 @@ import { importFromDocumentAction } from "../actions";
 import type { AccountActionErrorCode } from "../core/error-codes";
 
 /** "Erneut importieren" (F2's scope: import is "re-runnable from the UI") - idempotent, so a
- * re-run against an already-fully-imported batch simply reports zero new rows. */
-export function ReimportButton({ documentId, accountId }: { documentId: string; accountId: string }) {
+ * re-run against an already-fully-imported batch simply reports zero new rows. A settlement
+ * report has no `accountId` (its platform decides the clearing account) and replaces the lines a
+ * corrected reader yields differently ("Re-import" in `../README.md`). */
+export function ReimportButton({ documentId, accountId }: { documentId: string; accountId?: string }) {
   const t = useTranslations("Finance.detail");
   const router = useRouter();
   const [errorCode, setErrorCode] = useState<AccountActionErrorCode>();

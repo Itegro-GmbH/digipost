@@ -14,7 +14,7 @@ import { inferCurrency, parseGermanAmountToCents } from "./amount-parsing";
 import { isPlausibleIsoDate } from "./iso-date";
 import type { CounterpartyPlan } from "./party-roles";
 import type { AnalysisResult, ExtractedParty, GuidedAnalysisResult, InvoiceFields } from "./ports";
-import { toExtractedTaxFields } from "./tax-fields";
+import { toExtractedTaxFields, type ExtractedTaxFields } from "./tax-fields";
 
 const TITLE_MAX_LENGTH = 120;
 const SUMMARY_MAX_LENGTH = 300;
@@ -278,4 +278,12 @@ export function validateGuidedAnalysisResult(raw: unknown, plan: CounterpartyPla
     invoice: toInvoiceFields(fields.invoice),
     reminderDirection,
   };
+}
+
+/** The tax-only answer (`DocumentAnalyzer.extractTaxFields`): the same fields as an analysis's
+ * `invoice` block, at the top level of the JSON object. Never throws: anything that is not an
+ * object is read as an object without fields, so every tax field is `null`. */
+export function validateTaxFieldsResult(raw: unknown): ExtractedTaxFields {
+  const record = typeof raw === "object" && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  return toExtractedTaxFields(record);
 }

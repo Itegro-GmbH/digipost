@@ -14,7 +14,10 @@ Maintenance triggers:
 - A tax code, its USt-VA mapping, or the seed chart changes
 - A new write path touches a ledger table, or a control is added
 - The proposal engine or the UI stage lands (decisions/0080 phases)
-Last verified: 2026-11-12, fixes from the acceptance replay and the review: bank-transaction rules
+Last verified: 2026-11-12, notes after production use (decisions/0080): the settlement template
+nets Google's refunded fees, `tax_unverified` (no reverse charge guessed without printed tax
+figures, `core/tax-evidence.ts`), the advisor prompt's typical accounts, and `TaxBackfillCard`.
+Previously 2026-11-12, fixes from the acceptance replay and the review: bank-transaction rules
 (remittance text, no-document rules only, money direction), the payment fallback for a document
 without an open-item account, cancellations, the commissionaire-only settlement template,
 reverse charge against printed German VAT, rule tax codes by direction, open items at a date, the
@@ -93,6 +96,9 @@ overwrites a booked, dismissed or human-edited entry.
   origin, reason, warnings and source key out), `invoiceVatGroups` (an issued invoice's net and
   VAT per category, reconciled to its stored totals), the rule pickers.
 - `core/ports.ts`: `LedgerBookingAdvisor`, the AI port, with its question and answer shapes.
+- `core/tax-evidence.ts`: `hasPrintedTaxFigures` and `isUnverifiedReverseCharge`, whether a
+  document's figures back reverse charge (pure, no Node imports: the client editor imports
+  `core/proposals.ts`).
 - `core/booking-advisor.ts`: `validateBookingAdvice` (account from the question's chart, tax code
   fitting the direction, a split that adds up), `bookingAdviceCacheKey`, `toCacheableBookingAdvice`,
   and `createFakeLedgerBookingAdvisor` (keyword based, deterministic).
@@ -169,7 +175,7 @@ overwrites a booked, dismissed or human-edited entry.
   `AccountSheetTable`, `OpenItemsClient`, `VatPreviewView`, `AdvisorUploadForm`,
   `AdvisorUploadsList`, `AdvisorComparisonTable`, `PeriodsClient`, `FilingConfirmCard`,
   `SettingsGeneralForm`, `ChartSettings`, `RulesSettings`, `RuleForm`, `DocumentLedgerCard`,
-  `LedgerTabs`, `ReportsTabs`, `SettingsTabs`, `PeriodSelect`.
+  `LedgerTabs`, `ReportsTabs`, `SettingsTabs`, `PeriodSelect`, `TaxBackfillCard`.
 - The use cases `countWaitingProposals` (proposals not dismissed, any date) and `getSources`
   (the requested documents and bank transactions through `DocumentRepository.listForLedger` and
   `TransactionRepository.listForLedger`, extracted fields only; an id that is not found is left
@@ -320,8 +326,12 @@ under the shell's wide layout (`src/modules/dashboard-shell`'s `WIDE_LAYOUT_PREF
   advisor. A correcting draft is submitted the same way. The year's annual statement is the last
   row (no Zahllast; it locks the whole year).
 - `/dashboard/buchhaltung/einstellungen` (`SettingsTabs`): Allgemein (`SettingsGeneralForm`: start
-  date, USt-VA period, basis, "Kontenplan aktualisieren", "Buchhaltung ausschalten" behind an
-  inline confirm; nothing is deleted), `/kontenplan` (`ChartSettings`: grouped chart with kind,
+  date, USt-VA period, basis, "Kontenplan aktualisieren", the sections the page passes as
+  children, "Buchhaltung ausschalten" behind an inline confirm; nothing is deleted). Its child
+  `TaxBackfillCard` is "Steuerdaten alter Belege nachträglich erkennen": the documents owner's
+  backfill (`src/modules/documents/README.md`, "Tax field backfill"), its action handed in by the
+  page so this module imports no other owner's actions; it shows the candidates and, after a
+  click, how many documents are being read, `/kontenplan` (`ChartSettings`: grouped chart with kind,
   open items, owner and archived state; a new account with open items and an owner, bank account,
   contact, platform or person, whose type presets kind and group; edit name, description, group
   and open items; archive and restore; the owner options come from `listAccountsOverviewProjection`
@@ -357,7 +367,11 @@ Templates, from certain to uncertain:
   name pattern), else the AI, else 6300 with `ai_unavailable`. Tax: one base line per printed
   rate with the exact printed net and tax (`vst19` on 1406, `vst7` on 1401); `rc13b` (net = gross,
   1407/3837 pair) when the document says reverse charge or the supplier is foreign (contact
-  country not DE, or a non-DE VAT id) and shows no German VAT; the pass-through amount on its own
+  country not DE, or a non-DE VAT id) and shows no German VAT. Reverse charge is never a silent
+  guess: when the document prints no tax figure at all (no breakdown entry with an amount, no tax
+  total) and has no reverse-charge note, a foreign supplier's `rc13b` (and any `rc13b` the AI
+  answers then) carries `tax_unverified`, unless a rule with a tax code decides (the rule's code
+  is booked, no warning); `core/tax-evidence.ts` holds the test. The pass-through amount on its own
   `pass_through` line; with nothing printed the rule's or the AI's code, `not_taxable` for courts
   and authorities, else `vst19` from the gross with `no_tax_breakdown`. A German supplier (contact
   country DE or a DE VAT id) printing German VAT is booked from the printed breakdown even when
@@ -374,8 +388,12 @@ Templates, from certain to uncertain:
   printed tax fields, a rule, or `ust19` from the gross with `no_tax_breakdown`.
 - **Platform report** (`settlement:<documentId>:<YYYY-MM>`, booked on the month end or the
   report's period end), Apple and Google only (the commissionaire model: the store sells in its
-  own name, so the revenue is a supply to it): revenue and refunds on 4339 `eu_not_taxable`, fees
-  on 6855 (Google: `rc13b`) or a rule whose pattern names the platform, against the platform's
+  own name, so the revenue is a supply to it): revenue and refunds on 4339 `eu_not_taxable`
+  (charges minus charge refunds, withheld taxes included), fees on 6855 (Google: `rc13b`) or a
+  rule whose pattern names the platform (fees minus refunded fees: a fee line without a gross
+  whose net is the fee carries its own sign, so Google's "Google fee refund" reduces the fees;
+  a fee next to its sale is always a cost; the same rule as `src/modules/accounts`'
+  `settlementFeeEffectCents`), against the platform's
   receivable (1370 ff.), the receivable line carrying the report. Any other platform (Stripe,
   PayPal, Amazon, other) collects for the seller and needs another booking: no proposal, and the
   sync names the problem `unsupported_platform_settlement`.
@@ -397,13 +415,21 @@ Warnings: `no_tax_breakdown`, `amount_differs_from_payment`, `possible_pass_thro
 court or register costs with German VAT and no pass-through amount), `foreign_supplier_with_vat`
 (Finom NL, Apple IE with German VAT), `duplicate_suspect` (same contact, invoice number and
 amount as an earlier document), `ai_unavailable`, `reverse_charge_conflict` (a German supplier's
-printed German VAT next to a reverse-charge note). Problems (no proposal, named after
+printed German VAT next to a reverse-charge note), `tax_unverified` (reverse charge without a
+printed tax figure or a reverse-charge note: Apple Ireland charges German VAT, which only its
+printed figures show; "Steuer nicht erkannt"). Any warning keeps a proposal out of "Sicher", so a
+template proposal with `tax_unverified` is under "Bitte ansehen" too. Problems (no proposal, named after
 "Vorschläge aktualisieren"): `unsupported_platform_settlement`.
 
 **The AI advisor** (`LedgerBookingAdvisor`) is asked for an account from the workspace's own
 expense accounts, a tax code and one German sentence, optionally a split (a court fee and a
 dunning fee). It is told only the extracted fields, never the OCR text (AGENTS.md "Mistral and
-personal data"). Every answer, of any kind, is kept per document in `ledger_booking_advice` under
+personal data"). The prompt names the typical accounts (bank and payment-service fees such as
+Finom on 6855, authority fees such as a Gewerbeanmeldung and court costs on 6300 `not_taxable`,
+a notary on 6825 with its court and register fees as pass-through) and asks for `taxCode: null`
+instead of a guess when no tax figure and no reverse-charge note is known.
+`validateBookingAdvice` keeps an `rc13b` answer the question's figures do not back, marked
+`taxUnverified`, which the engine turns into the `tax_unverified` warning. Every answer, of any kind, is kept per document in `ledger_booking_advice` under
 a hash of the whole question and the advisor's version; the same question is never asked twice,
 a changed document, chart or prompt is. A sync asks at most 40 questions; the rest wait for the
 next run, which the job schedules right away. A failing call is not cached.
@@ -519,3 +545,12 @@ VAT), `tests/reports.test.ts` (the 2970 carry-forward, a match across the cut-of
 the correcting filing flow, concurrent writers on two connections, the unique revision index,
 `bulkBook` and the matching after a booking) and `src/persistence/tests/ledger-use-cases.db.test.ts`
 (the year boundary in the list, the Kontenblatt and the advisor comparison).
+Notes after production use: `tests/proposals.test.ts` ("Google Play fee refunds (July 2026)" and
+"no reverse charge guessed without tax figures": Apple Developer without and with its printed
+83,19 + 15,81, Finom 107,88 + 20,50, Meta with its reverse-charge note, a rule, the template
+default, an AI `rc13b`), `tests/booking-advisor.test.ts` (`taxUnverified`),
+`tests/review-queue-client.test.tsx` (a template proposal with `tax_unverified` under "Bitte
+ansehen"), `tests/tax-backfill-card.test.tsx`, `src/persistence/tests/settlement-reimport.db.test.ts`
+(a misclassified Google report re-imported, its proposal updated) and
+`src/persistence/tests/tax-backfill.db.test.ts` (an Apple Ireland proposal from `tax_unverified`
+to `vst19` after the backfill).

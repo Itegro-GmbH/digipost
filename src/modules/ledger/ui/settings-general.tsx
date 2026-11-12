@@ -14,10 +14,11 @@ import type { LedgerSettingsView, VatBasis, VatPeriod } from "../core/types";
 /**
  * "Einstellungen > Allgemein" (decisions/0080 spec section 5): start date, USt-VA period and
  * taxation basis; "Kontenplan aktualisieren" (new bank and clearing accounts get their ledger
- * account); and turning the ledger off again, behind an inline confirmation. Turning it off
+ * account); `children` (further sections the page adds); and turning the ledger off again, behind
+ * an inline confirmation. Turning it off
  * keeps every entry: the books are only hidden until it is turned on again.
  */
-export function SettingsGeneralForm({ settings, canManage }: { settings: LedgerSettingsView; canManage: boolean }) {
+export function SettingsGeneralForm({ settings, canManage, children }: { settings: LedgerSettingsView; canManage: boolean; children?: React.ReactNode }) {
   const t = useTranslations("Ledger");
   const router = useRouter();
   const [startDate, setStartDate] = useState(settings.startDate ?? "");
@@ -138,6 +139,10 @@ export function SettingsGeneralForm({ settings, canManage }: { settings: LedgerS
           </div>
         ) : null}
       </section>
+
+      {/* Further sections of other owners (the documents owner's tax field backfill), above the
+          destructive one. */}
+      {children}
 
       {canManage ? (
         <section aria-labelledby="settings-disable-heading" className="flex flex-col gap-2 rounded-lg border border-destructive/40 p-4">

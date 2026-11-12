@@ -8,15 +8,17 @@ import "server-only";
 import {
   validateAnalysisResult,
   validateGuidedAnalysisResult,
+  validateTaxFieldsResult,
   type AnalysisResult,
   type DocumentAnalyzer,
+  type ExtractedTaxFields,
   type GuidedAnalysisResult,
 } from "@/modules/documents";
 
 import { MISTRAL_ERROR_CODES, MistralRequestError } from "../core/errors";
 import { mistralChatResponseSchema } from "../core/schemas";
 import { mistralFetch, type MistralFetchConfig } from "./mistral-fetch";
-import { buildAnalyzerSystemPrompt, buildAnalyzerUserPrompt, buildGuidedDerivedSystemPrompt, buildGuidedOpenSystemPrompt } from "./prompts";
+import { buildAnalyzerSystemPrompt, buildAnalyzerUserPrompt, buildGuidedDerivedSystemPrompt, buildGuidedOpenSystemPrompt, buildTaxFieldsSystemPrompt } from "./prompts";
 
 export type MistralAnalyzerConfig = MistralFetchConfig & { model: string };
 
@@ -80,6 +82,13 @@ export function createMistralDocumentAnalyzer(config: MistralAnalyzerConfig): Do
       // Same never-throws guarantee as `validateAnalysisResult` - see that function's sibling
       // `validateGuidedAnalysisResult`'s own header comment.
       return validateGuidedAnalysisResult(raw, plan);
+    },
+
+    // The tax field backfill (`@/modules/documents`' README, "Tax field backfill"): the stored OCR
+    // text once more, asked only for the tax figures. Same request, guard and lenient parsing.
+    async extractTaxFields({ text }): Promise<ExtractedTaxFields> {
+      const raw = await fetchAnalyzerContent(config, buildTaxFieldsSystemPrompt(), text);
+      return validateTaxFieldsResult(raw);
     },
   };
 }

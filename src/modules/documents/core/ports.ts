@@ -206,4 +206,11 @@ export interface DocumentAnalyzer {
     kind: DocumentKind;
     plan: CounterpartyPlan;
   }): Promise<GuidedAnalysisResult>;
+
+  /** The tax field backfill (`../README.md`, "Tax field backfill"): ONLY the tax fields of an
+   * already processed invoice, from its stored OCR text, for a document processed before
+   * decisions/0080 phase 2 added them. Same printed-text contract as the invoice block of the
+   * other prompts (the model never computes a missing figure); every field `null` when nothing
+   * is found or the answer is unusable, never a thrown error for a malformed answer. */
+  extractTaxFields(input: { text: string; fileName: string }): Promise<ExtractedTaxFields>;
 }

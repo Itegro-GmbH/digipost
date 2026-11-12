@@ -17,6 +17,7 @@
 // invoice, a settlement report, a payment of a matched document), then a booking rule, then the
 // AI for an incoming document's account, then the template default with a warning. A source no
 // template explains gets no proposal at all (it shows as a problem), never a guess.
+import { hasPrintedTaxFigures, isUnverifiedReverseCharge } from "./tax-evidence";
 import type { BookingAdvice, BookingAdviceQuestion } from "./ports";
 import type { EntryInput, LineInput } from "./schemas";
 import type {
@@ -382,7 +383,7 @@ export function ruleForTransaction(rules: readonly ProposalRule[], tx: ProposalT
 // Tax decisions
 // ---------------------------------------------------------------------------------------------
 
-type Target = { accountNumber: string; taxCode: TaxCode | null; split: BookingAdvice["split"]; fromRule: boolean };
+type Target = { accountNumber: string; taxCode: TaxCode | null; split: BookingAdvice["split"]; fromRule: boolean; taxUnverified?: boolean };
 
 function usableBreakdown(entries: readonly ProposalTaxBreakdownEntry[], expectedGross: number): CompleteBreakdownEntry[] | null {
   const relevant = entries.filter((entry) => (entry.netCents ?? 0) !== 0 || (entry.taxCents ?? 0) !== 0);
@@ -422,6 +423,11 @@ function rateFromTotals(netCents: number | null, taxCents: number | null): 19 | 
  * printed net and tax, reverse charge for a foreign supplier without German VAT, the
  * pass-through part on its own line, the rule's or the AI's tax code when nothing is printed,
  * and the input tax derived from the gross with a warning when nothing at all is known.
+ *
+ * Reverse charge is never booked silently on a guess: when the document prints no tax figure at
+ * all and has no reverse-charge note, a foreign supplier still gets `rc13b` (the likelier case),
+ * but flagged `tax_unverified`, unless a rule with a tax code decides (a human confirmed it).
+ * Apple Ireland, for one, charges German VAT, which only the printed figures show.
  */
 function incomingLines(doc: ProposalDocument, total: number, target: Target, warnings: Set<ProposalWarningCode>): LineInput[] {
   const pass = passThroughOf(doc, total);
@@ -445,8 +451,12 @@ function incomingLines(doc: ProposalDocument, total: number, target: Target, war
       ? target.split.map((part) => ({ accountNumber: part.accountNumber, amountCents: part.amountCents, taxCode: code === "rc13b" ? "rc13b" : (part.taxCode ?? code), amountMode: mode }))
       : [{ accountNumber: account, amountCents: base, taxCode: code, amountMode: mode }];
 
-  if ((doc.reverseCharge === true && !reverseChargeConflict) || (foreign && !germanVat)) {
+  const ruleDecidesTax = target.fromRule && target.taxCode !== null;
+  if (doc.reverseCharge === true && !reverseChargeConflict) {
     lines.push(...splitOr("rc13b"));
+  } else if (foreign && !germanVat) {
+    // Nothing printed and nothing noted: a rule's tax code wins, else reverse charge, flagged below.
+    lines.push(...splitOr(ruleDecidesTax && !hasPrintedTaxFigures(doc) ? target.taxCode! : "rc13b"));
   } else if (breakdown) {
     for (const entry of breakdown) {
       if (entry.ratePercent === 19 || entry.ratePercent === 7) {
@@ -473,6 +483,7 @@ function incomingLines(doc: ProposalDocument, total: number, target: Target, war
     }
   }
   if (pass !== 0) lines.push({ accountNumber: account, amountCents: pass, taxCode: "pass_through" });
+  if (!ruleDecidesTax && (target.taxUnverified || isUnverifiedReverseCharge(lines.map((line) => line.taxCode ?? null), doc))) warnings.add("tax_unverified");
   return lines.filter((line) => line.amountCents !== 0).map((line) => ({ ...line, documentId: null }));
 }
 
@@ -719,7 +730,7 @@ function proposeIncoming(ctx: Context, advice: AdviceMap, plan: ProposalPlan, du
         continue;
       }
       if (answer && ctx.chart.usable(answer.accountNumber)) {
-        target = { accountNumber: answer.accountNumber, taxCode: answer.taxCode, split: answer.split, fromRule: false };
+        target = { accountNumber: answer.accountNumber, taxCode: answer.taxCode, split: answer.split, fromRule: false, taxUnverified: answer.taxUnverified === true };
         origin = "ai";
         originReason = answer.reason;
       } else {
@@ -833,6 +844,19 @@ function proposeInvoices(ctx: Context, plan: ProposalPlan): void {
   }
 }
 
+/**
+ * What a fee line costs (positive) or gives back (negative, a refunded fee). The same rule as
+ * `src/modules/accounts`' `settlementFeeEffectCents`, which writes these lines: a fee next to its
+ * sale (gross on the same row) is a positive magnitude and always a cost; a row that is nothing
+ * but a fee (no gross, its net is the fee: Google's commission and each refunded commission)
+ * carries its own sign, negative for the commission, positive for its refund.
+ */
+function feeExpenseCents(line: ProposalSettlementLine): number {
+  const fee = line.feeCents ?? 0;
+  if (line.grossCents === null && line.netCents !== null && Math.abs(line.netCents) === Math.abs(fee)) return -line.netCents;
+  return Math.abs(fee);
+}
+
 /** The fee account and tax code of a platform: a rule naming the platform, else 6855. */
 function feeTargetFor(ctx: Context, platform: string | null, label: string): { accountNumber: string; taxCode: TaxCode | null; rule: ProposalRule | null } {
   const name = `${platform ?? ""} ${label}`.toLowerCase();
@@ -874,7 +898,7 @@ function proposeSettlements(ctx: Context, plan: ProposalPlan, platformLabel: (pl
     const revenueCents = group.lines
       .filter((line) => line.type === "revenue" || line.type === "refund" || line.type === "adjustment")
       .reduce((sum, line) => sum + (line.grossCents ?? line.netCents ?? 0), 0);
-    const feeCents = group.lines.filter((line) => line.type === "fee").reduce((sum, line) => sum + Math.abs(line.feeCents ?? 0), 0);
+    const feeCents = group.lines.filter((line) => line.type === "fee").reduce((sum, line) => sum + feeExpenseCents(line), 0);
     const fee = feeTargetFor(ctx, group.platform, label);
     const lines: LineInput[] = [];
     if (revenueCents !== 0) lines.push({ accountNumber: REVENUE_ACCOUNTS.euNotTaxable, amountCents: -revenueCents, taxCode: "eu_not_taxable", documentId: null });

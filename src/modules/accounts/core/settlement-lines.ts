@@ -42,7 +42,7 @@ export type SettlementLineDraft = {
   externalLineId: string;
   /** The signed amount for the corresponding `transactions` row on the clearing account:
    * positive for `revenue` (a credit), negative for `fee`/`refund`/`payout`/`adjustment` (a
-   * debit) - never re-derived from `grossCents`/`feeCents`/`netCents` a second time by the
+   * debit), except a refunded fee, a `fee` line that credits (`settlementFeeEffectCents`) - never re-derived from `grossCents`/`feeCents`/`netCents` a second time by the
    * caller, this is the one place that decides the sign. */
   transactionAmountCents: number;
   /** What the ledger transaction's own `remittanceText` should read - the settlement line's
@@ -64,6 +64,25 @@ export type SettlementLineDraft = {
   countryOfSale: string | null;
 };
 
+/**
+ * What a fee does to the clearing account, signed (negative: a deduction). Two conventions meet
+ * here, and the row tells them apart:
+ *
+ * - A fee riding on its sale (Stripe: gross, fee and net on one row) is stated as a positive
+ *   magnitude and is always deducted.
+ * - A row that is nothing but a fee (no gross, its net IS the fee: Google states its commission
+ *   and each refunded commission as a row of their own, decisions/0052 as corrected in
+ *   `../README.md`'s "Google fee refunds") carries its own sign: a commission deducts, a refunded
+ *   commission credits the account.
+ *
+ * `src/modules/ledger`'s settlement template applies the same rule to the stored lines.
+ */
+export function settlementFeeEffectCents(row: { grossCents: number | null; feeCents: number | null; netCents: number | null }): number {
+  const fee = row.feeCents ?? 0;
+  if (row.grossCents === null && row.netCents !== null && Math.abs(row.netCents) === Math.abs(fee)) return row.netCents;
+  return -Math.abs(fee);
+}
+
 function rowExternalId(type: SettlementLineType, rowNumber: number): string {
   return `${type}:row${rowNumber}`;
 }
@@ -72,7 +91,8 @@ function rowExternalId(type: SettlementLineType, rowNumber: number): string {
  * Builds every settlement-line draft a confirmed report's rows imply: a `revenue`/`refund`
  * draft for each row with a non-null `grossCents` (split by sign - `decomposeSettlement`'s own
  * "positive for a sale, negative for a refund" convention, `@/modules/payments`'s
- * `SettlementLine`), a `fee` draft for each row with a non-zero `feeCents`, and one
+ * `SettlementLine`), a `fee` draft for each row with a non-zero `feeCents` (its amount from
+ * `settlementFeeEffectCents`: usually a deduction, a credit for a refunded fee), and one
  * synthesized `payout` draft per distinct non-null `payoutId` (the negative sum of every
  * `netCents` sharing that id - the amount the platform actually paid out, a debit on the
  * clearing account). A row with neither `grossCents` nor `feeCents` (Apple's report has no
@@ -113,7 +133,7 @@ export function buildSettlementLineDrafts(rows: readonly NormalizedSettlementLin
       drafts.push({
         type: "fee",
         externalLineId: rowExternalId("fee", row.rowNumber),
-        transactionAmountCents: -Math.abs(row.feeCents),
+        transactionAmountCents: settlementFeeEffectCents(row),
         remittanceText,
         grossCents: row.grossCents,
         feeCents: row.feeCents,

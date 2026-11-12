@@ -230,7 +230,7 @@ describe("buildProposals: incoming invoices", () => {
   });
 
   it("Meta prepaid credit: the top-up goes to 1461, every reverse-charge invoice consumes it, the rest stays open", async () => {
-    const meta = { contactId: META, contactName: "Meta Platforms Ireland Ltd.", contactCountry: "IE", contactVatId: "IE9692928F" };
+    const meta = { contactId: META, contactName: "Meta Platforms Ireland Ltd.", contactCountry: "IE", contactVatId: "IE9692928F", reverseCharge: true };
     const snap = snapshot({
       documents: [doc("meta-1", { ...meta, totalAmountCents: 2 }), doc("meta-2", { ...meta, totalAmountCents: 1300 }), doc("meta-3", { ...meta, totalAmountCents: 8654 })],
       transactions: [tx("tx-topup", -10_000, { counterpartyName: "FACEBK *QX7MNP41KD", resolvedContactId: META })],
@@ -256,7 +256,7 @@ describe("buildProposals: incoming invoices", () => {
   });
 
   it("Google Ads: charged 10 + 50 + 36,57 before one invoice of 96,57; the account reaches zero only as a suggested group", async () => {
-    const gads = { contactId: GOOGLE_ADS, contactName: "Google Ireland Limited", contactCountry: "IE", contactVatId: "IE6388047V", title: "Google Ads Rechnung" };
+    const gads = { contactId: GOOGLE_ADS, contactName: "Google Ireland Limited", contactCountry: "IE", contactVatId: "IE6388047V", title: "Google Ads Rechnung", reverseCharge: true };
     const charge = (id: string, cents: number, date: string) => tx(id, -cents, { bookingDate: date, counterpartyName: "GOOGLE *ADS1234", resolvedContactId: GOOGLE_ADS });
     const snap = snapshot({
       documents: [doc("gads", { ...gads, documentDate: "2026-08-31", effectiveDate: "2026-08-31", totalAmountCents: 9657 })],
@@ -426,6 +426,79 @@ describe("buildProposals: incoming invoices", () => {
   });
 });
 
+describe("buildProposals: no reverse charge guessed without tax figures", () => {
+  const appleDeveloper = { contactId: APPLE_IE, contactName: "Apple Distribution International Ltd.", contactCountry: "IE", contactVatId: "IE9700053D", title: "Apple Developer Program", totalAmountCents: 9900 };
+
+  it("Apple Developer invoice from Ireland without a breakdown: kept, but flagged tax_unverified", async () => {
+    const result = await plan(snapshot({ documents: [doc("apple-dev", appleDeveloper)] }));
+    const draft = draftFor(result, "doc:apple-dev");
+    expect(draft.origin).toBe("ai");
+    expect(draft.warnings).toContain("tax_unverified");
+    expect(draft.entry.lines[0]!.taxCode).toBe("rc13b");
+  });
+
+  it("the same invoice with its printed breakdown 83,19 + 15,81: vst19, flagged as a foreign supplier with VAT", async () => {
+    const result = await plan(snapshot({ documents: [doc("apple-dev", { ...appleDeveloper, taxBreakdown: [{ ratePercent: 19, netCents: 8319, taxCents: 1581 }] })] }));
+    const draft = draftFor(result, "doc:apple-dev");
+    expect(draft.warnings).toEqual(["foreign_supplier_with_vat"]);
+    expect(booked(draft).slice(0, 2)).toEqual([
+      ["6837", 8319, "vst19", null],
+      ["1406", 1581, "vst19", null],
+    ]);
+  });
+
+  it("Finom with its printed breakdown 107,88 + 20,50: vst19 on 6855, flagged as a foreign supplier with VAT", async () => {
+    const result = await plan(
+      snapshot({
+        documents: [doc("finom", { contactId: FINOM, contactName: "Finom B.V.", contactCountry: "NL", contactVatId: "NL862287339B01", title: "Kontoführung", totalAmountCents: 12_838, taxBreakdown: [{ ratePercent: 19, netCents: 10_788, taxCents: 2050 }] })],
+      }),
+    );
+    const draft = draftFor(result, "doc:finom");
+    expect(draft.warnings).toEqual(["foreign_supplier_with_vat"]);
+    expect(booked(draft).slice(0, 2)).toEqual([
+      ["6855", 10_788, "vst19", null],
+      ["1406", 2050, "vst19", null],
+    ]);
+  });
+
+  it("Meta with the reverse-charge note: rc13b without a warning", async () => {
+    const result = await plan(
+      snapshot({ documents: [doc("meta", { contactId: META, contactName: "Meta Platforms Ireland Ltd.", contactCountry: "IE", contactVatId: "IE9692928F", reverseCharge: true, totalAmountCents: 6000 })] }),
+    );
+    const draft = draftFor(result, "doc:meta");
+    expect(draft.warnings).toEqual([]);
+    expect(draft.entry.lines[0]!.taxCode).toBe("rc13b");
+  });
+
+  it("a rule's tax code wins and needs no warning", async () => {
+    const snap = snapshot({
+      rules: [{ id: "rule-apple", contactId: APPLE_IE, counterpartyPattern: null, direction: "incoming", accountNumber: "6837", taxCode: "vst19", paymentAccountNumber: null, noDocument: false }],
+      documents: [doc("apple-dev", appleDeveloper)],
+    });
+    const draft = draftFor(buildProposals(snap, new Map()), "doc:apple-dev");
+    expect(draft).toMatchObject({ origin: "rule", warnings: [] });
+    expect(booked(draft).slice(0, 2)).toEqual([
+      ["6837", 8319, "vst19", null],
+      ["1406", 1581, "vst19", null],
+    ]);
+  });
+
+  it("the template default (AI unavailable) is flagged too, so it never counts as safe", async () => {
+    const draft = draftFor(buildProposals(snapshot({ documents: [doc("apple-dev", appleDeveloper)] }), new Map([["apple-dev", null]])), "doc:apple-dev");
+    expect(draft.origin).toBe("template");
+    expect(draft.warnings).toEqual(["ai_unavailable", "tax_unverified"]);
+  });
+
+  it("an AI answer of rc13b for a supplier of unknown country without tax figures is flagged", async () => {
+    const unknown = doc("unknown", { contactName: "Some Vendor Ltd", contactCountry: null, totalAmountCents: 5000 });
+    const advice = validateBookingAdvice({ accountNumber: "6837", taxCode: "rc13b", reason: "Ausländische Software." }, adviceQuestionsFor(snapshot({ documents: [unknown] }))[0]!);
+    expect(advice).toMatchObject({ taxCode: "rc13b", taxUnverified: true });
+    const draft = draftFor(buildProposals(snapshot({ documents: [unknown] }), new Map([["unknown", advice]])), "doc:unknown");
+    expect(draft.warnings).toEqual(["tax_unverified"]);
+    expect(draft.entry.lines[0]!.taxCode).toBe("rc13b");
+  });
+});
+
 describe("buildProposals: outgoing invoices", () => {
   it("an invoice issued in Digipost at 19 %: receivables 1200 against 4400 and 3806; its inbox document is not booked twice", async () => {
     const groups = invoiceVatGroups([{ quantity: "10", unitPrice: "95.00", category: "S", ratePercent: 19 }], { netCents: 95_000, vatCents: 18_050 });
@@ -553,6 +626,67 @@ describe("buildProposals: platform reports and payouts", () => {
     const suggestions = suggestMatchGroups(lines);
     expect(suggestions).toHaveLength(1);
     expect(suggestions[0]!.lineIds).toHaveLength(4);
+  });
+});
+
+describe("buildProposals: Google Play fee refunds (July 2026)", () => {
+  // The owner's July report: charges minus a charge refund are 13,36, Google's fees minus the
+  // refunded fees 2,01, net 11,35. A refunded fee is a fee line with a positive amount
+  // (`src/modules/accounts`' reader, corrected 2026-11); stored as revenue it had booked
+  // revenue 36,29 and fees 24,94.
+  const report = doc("gp-07", { kind: "platform_settlement", direction: "unknown", platform: "google", totalAmountCents: null, servicePeriodTo: "2026-07-31" });
+  const line = (id: string, type: "revenue" | "refund" | "fee", cents: number) => ({
+    id,
+    documentId: "gp-07",
+    platform: "google",
+    type,
+    grossCents: type === "fee" ? null : cents,
+    feeCents: type === "fee" ? cents : null,
+    netCents: cents,
+    bookingDate: "2026-07-12",
+  });
+
+  it("books revenue as charges minus charge refunds and fees as fees minus fee refunds", async () => {
+    const result = await plan(
+      snapshot({
+        documents: [report],
+        settlementLines: [
+          line("charge-1", "revenue", 1430),
+          line("charge-2", "revenue", 1070),
+          line("charge-refund", "refund", -1164),
+          line("fee-1", "fee", -375),
+          line("fee-2", "fee", -2119),
+          line("fee-refund-1", "fee", 1071),
+          line("fee-refund-2", "fee", 1222),
+        ],
+      }),
+    );
+    expect(booked(draftFor(result, "settlement:gp-07:2026-07"))).toEqual([
+      ["4339", -1336, "eu_not_taxable", null],
+      ["6855", 201, "rc13b", null],
+      ["1407", 38, "rc13b", null],
+      ["3837", -38, "rc13b", null],
+      ["1371", 1135, null, "gp-07"],
+    ]);
+  });
+
+  it("still deducts a fee stated as a positive magnitude next to its sale", async () => {
+    const result = await plan(
+      snapshot({
+        documents: [report],
+        settlementLines: [
+          { id: "r", documentId: "gp-07", platform: "google", type: "revenue", grossCents: 1000, feeCents: 150, netCents: 850, bookingDate: "2026-07-12" },
+          { id: "f", documentId: "gp-07", platform: "google", type: "fee", grossCents: 1000, feeCents: 150, netCents: 850, bookingDate: "2026-07-12" },
+        ],
+      }),
+    );
+    expect(booked(draftFor(result, "settlement:gp-07:2026-07")).map(([accountNumber, cents]) => [accountNumber, cents])).toEqual([
+      ["4339", -1000],
+      ["6855", 150],
+      ["1407", 29],
+      ["3837", -29],
+      ["1371", 850],
+    ]);
   });
 });
 

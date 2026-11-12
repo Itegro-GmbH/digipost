@@ -21,7 +21,7 @@ import {
   type NormalizedSettlementLine,
 } from "@/modules/intake";
 
-import { buildSettlementLineDrafts } from "../core/settlement-lines";
+import { buildSettlementLineDrafts, settlementFeeEffectCents } from "../core/settlement-lines";
 
 function readFixture(name: string): string {
   return readFileSync(fileURLToPath(new URL(`../../intake/tests/fixtures/${name}`, import.meta.url)), "utf8");
@@ -147,5 +147,49 @@ describe("buildSettlementLineDrafts - Google Play earnings (real report)", () =>
 
     const netSum = drafts.reduce((sum, d) => sum + d.transactionAmountCents, 0);
     expect(netSum).toBe(parsed.netAmountCents);
+  });
+});
+
+// A "Google fee refund" (+10,71 for "Yearly (Planties)" in the owner's July 2026 report) was
+// stored as revenue, overstating revenue and fees by the same amount. It is a fee line now whose
+// transaction CREDITS the clearing account; a charge refund stays a refund.
+describe("buildSettlementLineDrafts - Google Play fee refunds", () => {
+  const parsed = parseGooglePlayEarnings(readIntakeFixture("google-play-earnings-all-row-types.csv"));
+  const drafts = buildSettlementLineDrafts(parsed.lines);
+  const byType = (type: string) => drafts.filter((d) => d.type === type).map((d) => [d.externalLineId, d.transactionAmountCents, d.feeCents, d.netCents]);
+
+  it("books the refunded fee as a fee line with a positive amount", () => {
+    expect(byType("fee")).toEqual([
+      ["fee:row2", -146, -146, -146],
+      ["fee:row4", 75, 75, 75],
+    ]);
+  });
+
+  it("keeps charges as revenue and the charge refund and the withheld tax as refunds", () => {
+    expect(byType("revenue")).toEqual([["revenue:row1", 973, null, 973]]);
+    expect(byType("refund")).toEqual([
+      ["refund:row3", -503, null, -503],
+      ["refund:row5", -197, null, -197],
+    ]);
+  });
+
+  it("still adds up to the report's own net", () => {
+    expect(drafts.reduce((sum, d) => sum + d.transactionAmountCents, 0)).toBe(parsed.netAmountCents);
+  });
+});
+
+describe("settlementFeeEffectCents", () => {
+  it("deducts a fee stated as a positive magnitude next to its sale (Stripe)", () => {
+    expect(settlementFeeEffectCents({ grossCents: 1000, feeCents: 30, netCents: 970 })).toBe(-30);
+  });
+
+  it("moves the account by a fee-only row's own signed net (Google fee and fee refund)", () => {
+    expect(settlementFeeEffectCents({ grossCents: null, feeCents: -146, netCents: -146 })).toBe(-146);
+    expect(settlementFeeEffectCents({ grossCents: null, feeCents: 1071, netCents: 1071 })).toBe(1071);
+  });
+
+  it("falls back to a deduction when a fee-only row's net is not the fee itself", () => {
+    expect(settlementFeeEffectCents({ grossCents: null, feeCents: 30, netCents: 970 })).toBe(-30);
+    expect(settlementFeeEffectCents({ grossCents: null, feeCents: 30, netCents: null })).toBe(-30);
   });
 });

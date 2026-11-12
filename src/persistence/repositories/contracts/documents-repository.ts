@@ -489,4 +489,20 @@ export interface DocumentRepository {
    * inclusive ISO `from`/`to` (either may be absent). Includes every status and kind: which of
    * them gets an entry is the ledger's decision, not this read's. */
   listForLedger(workspaceId: string, from?: string, to?: string): Promise<LedgerDocumentRow[]>;
+  /** The tax field backfill (src/modules/documents/README.md, "Tax field backfill"): how many
+   * documents of the workspace qualify and were never queued (`TAX_BACKFILL_KINDS` by effective
+   * kind, `done`, with a total and OCR text, every tax field `null`, `tax_backfill_requested_at`
+   * `null`). */
+  countTaxBackfillCandidates(workspaceId: string): Promise<number>;
+  /** Marks up to `limit` of those candidates as queued (`tax_backfill_requested_at = now`),
+   * oldest first, and returns their ids. One statement with `for update skip locked`, so two
+   * concurrent calls never mark (and so never queue) the same document twice. */
+  markTaxBackfillRequested(workspaceId: string, input: { limit: number; now: Date }): Promise<string[]>;
+  /** Writes the tax fields of one document, and nothing else, only while every one of them is
+   * still `null` (a reprocessing run that filled them meanwhile wins). `true` when written. */
+  fillEmptyTaxFields(workspaceId: string, id: string, fields: DocumentTaxFields): Promise<boolean>;
 }
+
+/** The kinds the tax field backfill reads again: what the ledger books as an invoice or receipt
+ * (an authority letter only with an amount, which every candidate needs anyway). */
+export const TAX_BACKFILL_KINDS = ["incoming_invoice", "outgoing_invoice", "receipt", "authority_letter"] as const;

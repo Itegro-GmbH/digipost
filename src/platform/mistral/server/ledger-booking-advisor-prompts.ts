@@ -18,10 +18,16 @@ Wähle genau EIN Konto aus GENAU dieser Liste, auf das der Aufwand gehört, und 
 
 Steuerschlüssel für eine Eingangsrechnung: ${ADVICE_TAX_CODES.incoming.join(", ")}.
 - vst19 / vst7: deutsche Umsatzsteuer 19 % / 7 % ist ausgewiesen.
-- rc13b: ausländischer Anbieter ohne deutsche Umsatzsteuer (Reverse Charge, § 13b UStG).
+- rc13b: nur, wenn der Beleg auf Reverse Charge (§ 13b UStG) hinweist oder ein ausländischer Anbieter laut Steueraufteilung keine Umsatzsteuer berechnet. Ein ausländischer Anbieter kann auch deutsche Umsatzsteuer ausweisen.
 - not_taxable: keine Umsatzsteuer, zum Beispiel Gerichtskosten, Behördengebühren, Beiträge.
 - tax_free: steuerfreie Leistung, zum Beispiel eine Versicherung.
 - pass_through: durchlaufender Posten.
+Sind weder Steueraufteilung noch Steuerbetrag noch ein Reverse-Charge-Hinweis bekannt, rate keinen Steuerschlüssel, sondern setze "taxCode" auf null.
+
+Typische Konten, wenn sie in der Liste stehen:
+- Kontoführung, Bankgebühren und Gebühren von Zahlungsdienstleistern (zum Beispiel Finom): 6855 Nebenkosten des Geldverkehrs.
+- Gebühren von Behörden (zum Beispiel eine Gewerbeanmeldung) und Gerichtskosten: 6300 mit not_taxable.
+- Notarkosten: 6825; darin enthaltene Gerichts- und Registergebühren sind durchlaufende Posten ohne Vorsteuer.
 Enthält ein Beleg zwei klar getrennte Kostenarten (zum Beispiel Gerichtskosten und eine Mahngebühr), darfst du den Bruttobetrag in "lines" aufteilen. Die Beträge in Cent müssen zusammen genau den Bruttobetrag ohne durchlaufende Posten ergeben. Sonst lass "lines" weg.
 
 Antworte ausschließlich mit einem JSON-Objekt exakt in dieser Form, ohne zusätzlichen Text:

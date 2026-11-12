@@ -57,6 +57,9 @@ export type BookingAdvice = {
   taxCode: TaxCode | null;
   reason: string;
   split: { accountNumber: string; taxCode: TaxCode | null; amountCents: number }[] | null;
+  /** Set (`true`) when the answer names `rc13b` although the question has no printed tax figure
+   * and no reverse-charge note: kept, but the proposal is flagged `tax_unverified`. */
+  taxUnverified?: true;
 };
 
 export interface LedgerBookingAdvisor {

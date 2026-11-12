@@ -172,7 +172,11 @@ production deploy must fail loudly, never silently simulate AI output).
   `fetchAnalyzerContent` helper for the request/outer-JSON.parse plumbing; only the system
   prompt (picked by `plan.mode`) and the validator (`validateGuidedAnalysisResult` instead of
   `validateAnalysisResult`) differ between the two methods. `processOcrDocument` calls
-  `analyzeGuided` exclusively since wave 2.
+  `analyzeGuided` exclusively since wave 2. `extractTaxFields` (the tax field backfill,
+  `src/modules/documents/README.md`) sends the stored OCR text once more with
+  `buildTaxFieldsSystemPrompt` (`server/prompts.ts`: only the tax part of the invoice block,
+  `TAX_JSON_FIELDS`, which the other prompts share) and validates with `validateTaxFieldsResult`.
+  Same "Mistral and personal data" status as every other call: real traffic waits for the DPA.
 - `server/get-ai-adapters.ts` - the env-based provider selection described above.
 - `server/intake-prompts.ts` / `server/mistral-intake-classifier.ts` / `server/get-intake-classifier.ts` -
   F1a's `IntakeClassifier` adapter, prompt, and getter (decisions/0020-universal-intake.md);

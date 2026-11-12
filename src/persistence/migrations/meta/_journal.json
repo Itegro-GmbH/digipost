@@ -239,6 +239,13 @@
       "when": 1794513315018,
       "tag": "0033_flippant_mercury",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1794520717850,
+      "tag": "0034_curvy_mongoose",
+      "breakpoints": true
     }
   ]
 }

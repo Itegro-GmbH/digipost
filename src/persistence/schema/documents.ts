@@ -175,6 +175,11 @@ export const documents = pgTable(
     servicePeriodFrom: date({ mode: "string" }),
     servicePeriodTo: date({ mode: "string" }),
     taxCheck: text({ enum: DOCUMENT_TAX_CHECK_RESULTS }),
+    // When "Steuerdaten alter Belege nachträglich erkennen" queued this document's tax-only
+    // re-extraction (src/modules/documents/README.md, "Tax field backfill"). Set once, whether or
+    // not the extraction then finds anything, so a second click never sends the same document to
+    // the AI again. `null` for every document never queued.
+    taxBackfillRequestedAt: timestamp({ withTimezone: true }),
     // F3b (decisions/0025-payment-matching-wiring.md): a stored, denormalized projection of
     // this document's own payment-matching state (`@/modules/payments`'s `PaymentStatus`) -
     // recomputed by `PaymentsUseCases` whenever a matching decision actually happens

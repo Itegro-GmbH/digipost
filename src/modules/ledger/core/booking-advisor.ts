@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import type { BookingAdvice, BookingAdviceQuestion, BookingAdviceRaw, LedgerBookingAdvisor } from "./ports";
+import { isUnverifiedReverseCharge } from "./tax-evidence";
 import { TAX_CODES, type TaxCode } from "./types";
 
 /** The tax codes an answer may name, per direction. */
@@ -46,7 +47,8 @@ function taxCodeFor(value: string | null, direction: BookingAdviceQuestion["dire
  * The answer as the engine may use it, or `null` when it must be discarded: an unparseable
  * shape, an empty reason, an account not offered in the question, a tax code outside
  * `ADVICE_TAX_CODES` for the direction, or a split whose parts are not all of the document's sign
- * or do not add up to its gross amount without the pass-through part.
+ * or do not add up to its gross amount without the pass-through part. An `rc13b` the question's
+ * figures do not back is kept with `taxUnverified` (`isUnverifiedReverseCharge`).
  */
 export function validateBookingAdvice(raw: unknown, question: BookingAdviceQuestion): BookingAdvice | null {
   const parsed = rawAdviceSchema.safeParse(raw);
@@ -59,8 +61,13 @@ export function validateBookingAdvice(raw: unknown, question: BookingAdviceQuest
   const sentence = firstSentence(reason);
   if (sentence.length === 0) return null;
 
+  // An `rc13b` without a printed tax figure or a reverse-charge note is kept but marked, so the
+  // engine flags the proposal `tax_unverified` instead of booking reverse charge silently.
+  const marked = (advice: BookingAdvice): BookingAdvice =>
+    isUnverifiedReverseCharge([advice.taxCode, ...(advice.split ?? []).map((line) => line.taxCode)], question) ? { ...advice, taxUnverified: true } : advice;
+
   const rawLines = parsed.data.lines ?? [];
-  if (rawLines.length === 0) return { accountNumber, taxCode, reason: sentence, split: null };
+  if (rawLines.length === 0) return marked({ accountNumber, taxCode, reason: sentence, split: null });
   if (rawLines.length > MAX_ADVICE_SPLIT_LINES) return null;
   const expected = question.totalAmountCents - (question.passThroughCents ?? 0);
   const split: NonNullable<BookingAdvice["split"]> = [];
@@ -72,7 +79,7 @@ export function validateBookingAdvice(raw: unknown, question: BookingAdviceQuest
     split.push({ accountNumber: line.accountNumber, taxCode: lineTax, amountCents: line.amountCents });
   }
   if (split.reduce((sum, line) => sum + line.amountCents, 0) !== expected) return null;
-  return { accountNumber, taxCode, reason: sentence, split: split.length > 1 ? split : null };
+  return marked({ accountNumber, taxCode, reason: sentence, split: split.length > 1 ? split : null });
 }
 
 /** Bumped whenever the hashed payload's shape changes. */

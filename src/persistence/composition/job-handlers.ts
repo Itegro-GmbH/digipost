@@ -20,6 +20,7 @@ import { MATCH_TRIGGERS } from "@/modules/payments";
 import type { AccountsUseCases } from "@/persistence/use-cases/accounts-use-cases";
 import {
   DOCUMENT_ERROR,
+  type BackfillTaxFieldsInput,
   type DocumentUseCases,
   type ImportAccountTransactionsInput,
   type ProcessDocumentInput,
@@ -55,6 +56,7 @@ const purgeRejectedIntakePayloadSchema = z.object({ workspaceId: z.uuid(), docum
 const processInboundEmailPayloadSchema = z.object({ workspaceId: z.uuid(), inboundEmailId: z.uuid() });
 const sendMailIntakeNotificationPayloadSchema = z.object({ workspaceId: z.uuid(), inboundEmailId: z.uuid(), reason: z.enum(NOTIFIED_REASONS) });
 const ledgerSyncPayloadSchema = z.object({ workspaceId: z.uuid() });
+const backfillTaxFieldsPayloadSchema = z.object({ workspaceId: z.uuid(), documentId: z.uuid() });
 
 /** decisions/0080 phase 3: a finished matching run is the moment new evidence exists for the
  * ledger (a confirmed match, a new statement, a new report). Scheduling is deduplicated and a
@@ -148,6 +150,16 @@ export function createJobHandlers(deps: {
         if (err instanceof UseCaseError && err.code === LEDGER_ERROR.disabled) return;
         throw err;
       }
+    },
+
+    // decisions/0080's notes after production use: the tax fields of one older document. A
+    // document that got any is new evidence for the ledger, so its sync is scheduled (deduplicated,
+    // a no-op while the ledger is off); the sync then updates the document's proposal as long as
+    // nobody edited, booked or dismissed it.
+    [JOB_KINDS.backfillTaxFields]: async (payload) => {
+      const input: BackfillTaxFieldsInput = backfillTaxFieldsPayloadSchema.parse(payload);
+      const { filled } = await deps.documents.backfillDocumentTaxFields(input);
+      if (filled) await scheduleLedgerSync(deps.ledger, input.workspaceId);
     },
 
     // The 80% quota warning e-mail (P3, decisions/0017-billing-tiers-and-packages.md).
