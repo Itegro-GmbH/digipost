@@ -14,7 +14,11 @@ Maintenance triggers:
 - A tax code, its USt-VA mapping, or the seed chart changes
 - A new write path touches a ledger table, or a control is added
 - The proposal engine or the UI stage lands (decisions/0080 phases)
-Last verified: 2026-11-12, decisions/0080-ledger-double-entry-bookkeeping.md phase 3 (the proposal
+Last verified: 2026-11-12, decisions/0080-ledger-double-entry-bookkeeping.md UI stage, part 1: the
+pages `/dashboard/buchhaltung` (overview, "Buchhaltung aktivieren"), `/zu-pruefen` (the review
+queue), `/buchung/[id]` and `/buchung/neu` (the booking editor) and `/journal`, the components in
+`ui/` and `client.ts`, `core/search-params.ts`, `core/periods.ts`, and the use cases
+`countWaitingProposals` and `getSources`. Previously 2026-11-12, phase 3 (the proposal
 engine, the AI booking advisor and its answer cache, automatic open-item matching, rule learning,
 the `ledger-sync` job), against `core/proposals.ts`, `core/booking-advisor.ts`,
 `core/open-item-matching.ts`, `core/rule-learning.ts` and `src/persistence/use-cases/ledger-use-cases.ts`.
@@ -31,8 +35,9 @@ revision per change, until a filing to the tax office locks the period it covers
 Admin-only end to end, like every finance table: pages need `finance.read` (and the ledger
 enabled), every action `finance.manage`. There is no member-level access.
 
-There are no pages and no navigation entry yet. The proposal engine (phase 3, "Proposal engine"
-below) writes through `LedgerUseCases.upsertProposal`, keyed by a source key (`doc:<documentId>`,
+The UI's first part ("UI" below) has the overview, the review queue, the booking editor and the
+journal, in the sidebar's "Buchhaltung" section for an admin of a workspace that enabled the
+ledger. The proposal engine (phase 3, "Proposal engine" below) writes through `LedgerUseCases.upsertProposal`, keyed by a source key (`doc:<documentId>`,
 `tx:<transactionId>`, `invoice:<invoiceId>`, `settlement:<documentId>:<YYYY-MM>`); it never
 overwrites a booked, dismissed or human-edited entry.
 
@@ -81,12 +86,21 @@ overwrites a booked, dismissed or human-edited entry.
 - `actions.ts`: one Server Action per write, each parsed with its schema, then
   `requirePermission(PERMISSIONS.financeManage)`, then the use case with the caller's own
   workspace id.
+- `core/search-params.ts`: the URL filters of "Zu prüfen" (`?von=&bis=&herkunft=&nur=warnungen`)
+  and the journal (`?von=&bis=&status=&herkunft=&konto=&seit=&anzahl=`), an empty or malformed
+  value counting as absent (decisions/0062), and the journal's use-case filter and search string.
+- `core/periods.ts`: `describePeriod` (month, quarter, year or range, for the labels),
+  `lockingFilingFor` (the submitted filing covering a date) and `firstOpenDate` (where "Korrektur
+  buchen" dates its entry).
+- `ui/`: the page components (see "UI").
 
 ## Public interfaces
 
 - `index.ts` (neutral): the pure domain above, used by `src/persistence/use-cases/ledger-use-cases.ts`
   and `src/persistence/schema/ledger.ts`.
 - `server.ts`: `getLedgerSettingsProjection`, `isLedgerEnabledProjection`,
+  `countLedgerWaitingProposalsProjection` (the nav badge), `getLedgerSourcesProjection` (documents
+  and bank transactions behind entries),
   `listLedgerAccountsProjection`, `listJournalEntriesProjection`, `getJournalEntryProjection`,
   `getLedgerBalancesProjection`, `getLedgerAccountSheetProjection`,
   `getLedgerOpenItemsProjection`, `listLedgerOpenItemAccountsProjection`,
@@ -109,7 +123,14 @@ overwrites a booked, dismissed or human-edited entry.
   ("Als Regel speichern").
 - Use cases without an action: `scheduleSync` (the `ledger-sync` job), `autoMatchOpenItems`
   (after every sync and every booking).
-- There is no `client.ts` yet: the UI stage adds it with the first page components.
+- `client.ts`: `AccountTag`, `EntryEditor` (with `EditorEntry`, `EditorSeed`), `EntryLinesTable`,
+  `JournalFilters`, `JournalTable`, `LedgerEnableCard`, `PeriodName`, `OriginPill`,
+  `PeriodStatusPill`, `StatusPill`, `ReviewQueueClient` (with `QueueProblem`), `RevisionHistory`,
+  `SourcePanel`, `SyncProposalsButton`.
+- The use cases `countWaitingProposals` (proposals not dismissed, any date) and `getSources`
+  (the requested documents and bank transactions through `DocumentRepository.listForLedger` and
+  `TransactionRepository.listForLedger`, extracted fields only; an id that is not found is left
+  out, which the UI shows as "Beleg gelöscht").
 
 ## Rules
 
@@ -143,6 +164,63 @@ overwrites a booked, dismissed or human-edited entry.
 - **Enabling** (`setSettings` with `enabled: true`, or `syncChart`) seeds the SKR 04 subset and
   adds an owned account for each bank and clearing `accounts` row that has none: the first bank
   account takes over the seeded 1800. It is idempotent and never renumbers an existing account.
+
+## UI
+
+Every page checks `finance.read` (else `notFound()`) and that the ledger is enabled (else
+`notFound()`, except the overview, which then shows the "Buchhaltung aktivieren" card to an admin);
+writing controls render only with `finance.manage`, and every action checks it again. The pages sit
+under the shell's wide layout (`src/modules/dashboard-shell`'s `WIDE_LAYOUT_PREFIXES`). Copy is
+`Ledger.*` in `de.json`.
+
+- `/dashboard/buchhaltung` (overview): proposals waiting with "Jetzt prüfen" and "Vorschläge
+  aktualisieren" (`SyncProposalsButton`, the result inline), three tiles (the current period's
+  "Bank stimmt?" control, open-item accounts not at zero and how many are explained, the current
+  USt-VA period's Zahllast), the year's USt-VA periods (`getPeriodOverview`, `?jahr=`) newest
+  first with a status pill (label and icon, never colour alone), the changes since a handover and
+  one line naming each failing check with a link to where it is fixed, and a link to
+  `/dashboard/abschluss`. Off: `LedgerEnableCard` (start date, default the first day of the current
+  year; USt-VA monthly or quarterly; Soll or Ist, each with a plain hint) saving through
+  `saveLedgerSettingsAction`.
+- `/dashboard/buchhaltung/zu-pruefen` (`ReviewQueueClient`): proposals grouped "Sicher (Vorlage oder
+  Regel)" (template or rule, balanced, no warning: `ui/queue-model.ts`'s `isSafeProposal`) and
+  "Bitte ansehen" (the AI, a manual proposal, a warning, a difference), then "Probleme": the
+  control subjects `unbooked_bank_transactions` and `unbooked_documents` of the filtered period that
+  no open proposal covers, each with "Buchung anlegen" (`/buchung/neu?umsatz=` or `?beleg=`). A
+  row has the date, text, amount, origin pill (the AI in the warm colour with "Warum?" and its
+  sentence), the deterministic sentence (`t(summary.key, summary.params)`), warning chips with
+  their sentence, the Buchungssatz in a disclosure, and Buchen, Bearbeiten, Verwerfen (inline
+  confirm). "Alle sicheren auswählen" never selects the AI or a warned proposal; "N buchen (Summe)"
+  books through `bulkBookJournalEntriesAction` and shows each failure on its row. Booking removes a
+  row at once and puts it back with its error if the action fails. Keys: j/k move, Enter books the
+  focused row, e edits, x selects, ? shows the help; none acts while typing in a field.
+- `/dashboard/buchhaltung/buchung/[id]` and `/buchung/neu` (`SourcePanel`, `EntryEditor`,
+  `RevisionHistory`): the source on the left (document fields with the printed tax breakdown,
+  links to the document page and its PDF; the bank transaction; "Beleg gelöscht" when it is gone),
+  the editor on the right. Modes Ausgabe, Einnahme, Umbuchung, Aufteilen, Experte
+  (`ui/editor-model.ts`, pure): every mode is a list of base lines that `expandTaxLines` turns into
+  the live "So wird gebucht" table, the same function the use case books with; switching modes goes
+  through those lines and a simple mode accepts only lines that fit it ("passt in keine Vorlage").
+  The account field is `AccountCombobox` (ARIA combobox over the chart: name, number, group). An
+  amount with a tax code is gross in the simple modes (Brutto/Netto toggle) and net in the expert
+  grid; a printed tax amount from the document is kept while amount and code are unchanged.
+  Booking needs balanced lines and, in Aufteilen, nothing left to distribute; saving a proposal
+  may stay unbalanced. A booked entry needs a reason to be changed, unbooked or deleted. "Für
+  <Kontakt> künftig so vorschlagen" calls `learnLedgerRuleFromEntryAction` after booking (ticked
+  for an AI proposal). A locked entry is read-only with "Korrektur buchen" (`/buchung/neu?korrektur=`:
+  the lines reversed, dated `firstOpenDate`, `correctionOfEntryId` set) and a link to the periods.
+  `stale_revision` offers "Neu laden". `/buchung/neu?beleg=` prefills from the document (direction,
+  amount, tax code from a single printed rate or reverse charge, the contact's open-item account or
+  3300/1200), `?umsatz=` from the bank transaction (its bank account, the direction by sign).
+- `/dashboard/buchhaltung/journal` (`JournalFilters`, `JournalTable`): every entry, proposals dashed,
+  locked entries with a lock (`lockingFilingFor`), the main Soll and Haben account, filters in the
+  URL including "Geändert seit Übergabe" once a handover exists, 200 rows at a time with "Mehr laden".
+
+Not built yet (the UI's second part): the account pages (`/konten`, the Kontenblatt, open-item
+matching), the reports (`/auswertungen`: Summen und Salden with the tax advisor's comparison, the
+USt-VA preview, periods and filings), the settings (chart and rules), and the document page's
+"Buchhaltung" card. The overview and the editor already link to `/dashboard/buchhaltung/konten`,
+`/auswertungen/ust`, `/auswertungen/abgleich` and `/auswertungen/zeitraeume`.
 
 ## Proposal engine
 
@@ -269,4 +347,11 @@ the job handlers), `src/persistence/tests/ledger-sync.db.test.ts` (the sync end 
 AI cache, idempotency, edited and dismissed proposals, automatic matches and suggestions,
 learned rules and hits, workspace scoping). The fixtures are the real cases of decisions/0080: IONOS, the Meta prepaid credit,
 Google Ads charged 10 + 50 + 36,57 against one invoice of 96,57, the notary paid by a shareholder
-with 9,00 pass-through costs, the share capital, the court letter with 300 + 5.
+with 9,00 pass-through costs, the share capital, the court letter with 300 + 5. UI part 1:
+`tests/editor-model.test.ts` (each mode's lines for IONOS, Meta § 13b, the court split, a transfer
+and income; recognizing existing lines; mode switching; the correction's reversed lines),
+`tests/entry-editor.test.tsx`, `tests/review-queue-client.test.tsx` and
+`tests/journal-filters.test.tsx` (Testing Library + jsdom, the actions mocked),
+`tests/search-params.test.ts`, `tests/periods.test.ts`, `tests/revision-diff.test.ts`, and
+`tests/ui-messages-i18n.test.ts` (every literal message key in `ui/` and the pages resolves, and
+every value set the UI shows).

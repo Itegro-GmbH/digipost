@@ -200,3 +200,50 @@ describe("ledger use cases: the database's refusals", () => {
     await expect(ledger.createEntry({ workspaceId: WS, userId: USER, entry: ionos, book: false })).rejects.toThrow("connection reset");
   });
 });
+
+describe("the UI's source and badge reads", () => {
+  function withReads(overrides: Partial<Repositories>, ledgerExtra: Partial<LedgerRepository> = {}) {
+    const { state } = setup();
+    const base = fakeLedger(state);
+    const ledgerRepo = new Proxy(base, { get: (target, prop, receiver) => (prop in ledgerExtra ? ledgerExtra[prop as keyof LedgerRepository] : Reflect.get(target, prop, receiver)) });
+    const repos: Repositories = withUnusedRepositories({ ledger: ledgerRepo, ...overrides });
+    const uow: UnitOfWork = { transaction: (work) => work(repos) };
+    return createLedgerUseCases({ repos, uow, now: () => NOW });
+  }
+
+  it("getSources returns the requested documents and transactions only, with the bank account's name", async () => {
+    const ledger = withReads({
+      document: { listForLedger: async () => [{ id: "doc-1", title: "Rechnung", contactName: "IONOS SE", taxBreakdown: null }, { id: "doc-2" }] } as never,
+      transaction: { listForLedger: async () => [{ id: "tx-1", accountId: "bank-1", bookingDate: "2026-08-19", amountCents: -5000, currency: "EUR", counterpartyName: "Google", remittanceText: null }] } as never,
+      account: { listForWorkspace: async () => [{ id: "bank-1", name: "Finom Main" }] } as never,
+    });
+    const sources = await ledger.getSources(WS, { documentIds: ["doc-1", "doc-missing"], transactionIds: ["tx-1"] });
+    expect(sources.documents.map((document) => [document.id, document.contactName])).toEqual([["doc-1", "IONOS SE"]]);
+    expect(sources.transactions).toEqual([
+      { id: "tx-1", accountId: "bank-1", accountName: "Finom Main", bookingDate: "2026-08-19", amountCents: -5000, currency: "EUR", counterpartyName: "Google", remittanceText: null },
+    ]);
+  });
+
+  it("getSources reads nothing for no ids", async () => {
+    const ledger = withReads({});
+    expect(await ledger.getSources(WS, { documentIds: [], transactionIds: [] })).toEqual({ documents: [], transactions: [] });
+  });
+
+  it("countWaitingProposals counts the proposals of every date", async () => {
+    const periods: { from: string; to: string }[] = [];
+    const ledger = withReads({}, {
+      countEntries: async (_ws, period) => {
+        periods.push(period);
+        return { booked: 1, proposed: 4, unbalancedProposed: 0 };
+      },
+    });
+    expect(await ledger.countWaitingProposals(WS)).toBe(4);
+    expect(periods).toEqual([{ from: "0001-01-01", to: "9999-12-31" }]);
+  });
+
+  it("both refuse while the ledger is off", async () => {
+    const { ledger } = setup({ enabled: false });
+    await expect(ledger.countWaitingProposals(WS)).rejects.toMatchObject({ code: LEDGER_ERROR.disabled });
+    await expect(ledger.getSources(WS, { documentIds: [], transactionIds: [] })).rejects.toMatchObject({ code: LEDGER_ERROR.disabled });
+  });
+});
