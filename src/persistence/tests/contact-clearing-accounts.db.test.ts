@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 
+import { EMPTY_TAX_FIELDS } from "@/modules/documents";
 import { normalizeName } from "@/modules/contacts";
 import { aliasKeyForCounterparty } from "@/modules/payments";
 import { getDb } from "@/persistence/foundation/client";
@@ -91,6 +92,8 @@ async function createIncomingInvoice(
     paymentIban: null,
     paymentReference: null,
     paidNote: null,
+    ...EMPTY_TAX_FIELDS,
+    taxCheck: null,
     kind: "incoming_invoice",
     paymentStatus: "open",
   });

@@ -296,3 +296,58 @@ describe("validateGuidedAnalysisResult", () => {
     expect(Object.keys(result).sort()).toEqual(["counterparty", "documentDate", "invoice", "parties", "reminderDirection", "sender", "summary", "title"]);
   });
 });
+
+// decisions/0080-ledger-double-entry-bookkeeping.md, phase 2: the tax fields of the invoice
+// block, parsed from the printed text through the same lenient boundary.
+describe("invoice tax fields", () => {
+  const DERIVED_PLAN: CounterpartyPlan = { mode: "derived", ourRole: "recipient", counterpartyRole: "sender", relationType: "supplier" };
+
+  it("parses a two-rate breakdown, the totals and the service period from German printed amounts", () => {
+    const result = validateGuidedAnalysisResult(
+      {
+        invoice: {
+          totalAmount: "1.181,88 EUR",
+          netTotalAmount: "1.057,88 EUR",
+          taxTotalAmount: "124,00 EUR",
+          taxBreakdown: [
+            { rate: "19 %", netAmount: "607,88 EUR", taxAmount: "115,50 EUR" },
+            { rate: "7 %", netAmount: "450,00 EUR", taxAmount: "31,50 EUR" },
+          ],
+          servicePeriodFrom: "2026-06-01",
+          servicePeriodTo: "2026-06-30",
+          reverseCharge: false,
+        },
+      },
+      DERIVED_PLAN,
+    );
+    expect(result.invoice).toMatchObject({
+      totalAmountCents: 118188,
+      netTotalCents: 105788,
+      taxTotalCents: 12400,
+      taxBreakdown: [
+        { ratePercent: 19, netCents: 60788, taxCents: 11550 },
+        { ratePercent: 7, netCents: 45000, taxCents: 3150 },
+      ],
+      servicePeriodFrom: "2026-06-01",
+      servicePeriodTo: "2026-06-30",
+      serviceDate: null,
+      reverseCharge: false,
+    });
+  });
+
+  it("carries reverse charge and pass-through amounts", () => {
+    const result = validateAnalysisResult({ invoice: { totalAmount: "13,00 EUR", reverseCharge: true, passThroughAmount: "9,00 EUR", serviceDate: "2026-06-30" } });
+    expect(result.invoice).toMatchObject({ reverseCharge: true, passThroughCents: 900, serviceDate: "2026-06-30" });
+  });
+
+  it("degrades malformed tax fields to null instead of failing", () => {
+    const result = validateAnalysisResult({
+      invoice: { totalAmount: "49,99 EUR", taxBreakdown: "19 %", netTotalAmount: 42.01, reverseCharge: "vielleicht", serviceDate: "30.06.2026" },
+    });
+    expect(result.invoice).toMatchObject({ totalAmountCents: 4999, taxBreakdown: null, netTotalCents: null, reverseCharge: null, serviceDate: null });
+  });
+
+  it("does not keep an invoice alive on reverseCharge false alone", () => {
+    expect(validateAnalysisResult({ invoice: { reverseCharge: false, taxBreakdown: [] } }).invoice).toBeNull();
+  });
+});

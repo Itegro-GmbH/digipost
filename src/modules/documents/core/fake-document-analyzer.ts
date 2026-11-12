@@ -94,6 +94,40 @@ function extractLabeled(text: string, pattern: RegExp): string | null {
 
 const INVOICE_LIKE_FIXTURE_IDS: readonly FixtureRuleId[] = ["invoice", "reminder"];
 
+const AMOUNT = String.raw`([\d.,]+\s*EUR)`;
+const GERMAN_DATE = String.raw`(\d{2}\.\d{2}\.\d{4})`;
+
+/** decisions/0080, phase 2: the printed tax lines the fake OCR's invoice fixtures carry
+ * ("Netto 19 %: 42,01 EUR", "USt 19 %: 7,98 EUR"), read off the text as the raw strings the real
+ * model is asked for, one entry per rate. Parsing and checking stay with
+ * `validateAnalysisResult`/the use case, exactly as for the real adapter. */
+function extractRawTaxFields(text: string) {
+  const byRate = new Map<string, { rate: string; netAmount: string | null; taxAmount: string | null }>();
+  const entryFor = (rate: string) => {
+    const existing = byRate.get(rate);
+    if (existing) return existing;
+    const created = { rate: `${rate} %`, netAmount: null as string | null, taxAmount: null as string | null };
+    byRate.set(rate, created);
+    return created;
+  };
+  for (const match of text.matchAll(new RegExp(String.raw`Netto (\d{1,2}(?:,\d{1,2})?) %:\s*${AMOUNT}`, "gi"))) entryFor(match[1]!).netAmount = match[2]!;
+  for (const match of text.matchAll(new RegExp(String.raw`USt (\d{1,2}(?:,\d{1,2})?) %:\s*${AMOUNT}`, "gi"))) entryFor(match[1]!).taxAmount = match[2]!;
+
+  const period = text.match(new RegExp(String.raw`Leistungszeitraum:\s*${GERMAN_DATE}\s*(?:bis|-)\s*${GERMAN_DATE}`, "i"));
+  const serviceDateGerman = extractLabeled(text, new RegExp(String.raw`Leistungsdatum:\s*${GERMAN_DATE}`, "i"));
+
+  return {
+    taxBreakdown: [...byRate.values()],
+    netTotalAmount: extractLabeled(text, new RegExp(String.raw`Nettobetrag:\s*${AMOUNT}`, "i")),
+    taxTotalAmount: extractLabeled(text, new RegExp(String.raw`USt gesamt:\s*${AMOUNT}`, "i")),
+    passThroughAmount: extractLabeled(text, new RegExp(String.raw`Durchlaufende Posten:\s*${AMOUNT}`, "i")),
+    reverseCharge: /reverse charge|steuerschuldnerschaft des leistungsempfängers/i.test(text),
+    serviceDate: serviceDateGerman ? extractGermanDate(serviceDateGerman) : null,
+    servicePeriodFrom: period?.[1] ? extractGermanDate(period[1]) : null,
+    servicePeriodTo: period?.[2] ? extractGermanDate(period[2]) : null,
+  };
+}
+
 /** The raw (pre-`validateAnalysisResult`) shape both `analyze` and `analyzeGuided` build from -
  * extracted here once so `analyzeGuided` can reshape the SAME keyword-driven extraction per
  * `CounterpartyPlan` mode instead of re-deriving it independently (and risking the two methods
@@ -165,6 +199,7 @@ function buildRawAnalysis(text: string, fileName: string, ownCompany: OwnCompany
         paymentIban: iban,
         paymentReference: invoiceNumber,
         paidNote: /\bbezahlt\b/i.test(text) ? "Bereits bezahlt" : null,
+        ...extractRawTaxFields(text),
       }
     : null;
 

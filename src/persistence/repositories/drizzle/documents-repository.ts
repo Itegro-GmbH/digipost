@@ -13,6 +13,8 @@ import type {
   ClosingLinkedTransaction,
   DocumentRepository,
   DocumentWithRelations,
+  LedgerDocumentLinkedTransaction,
+  LedgerDocumentRow,
   ListDocumentsFilter,
 } from "@/persistence/repositories/contracts/documents-repository";
 
@@ -195,6 +197,15 @@ export function createDrizzleDocumentRepository(db: DbExecutor): DocumentReposit
     paymentIban: documents.paymentIban,
     paymentReference: documents.paymentReference,
     paidNote: documents.paidNote,
+    taxBreakdown: documents.taxBreakdown,
+    netTotalCents: documents.netTotalCents,
+    taxTotalCents: documents.taxTotalCents,
+    passThroughCents: documents.passThroughCents,
+    reverseCharge: documents.reverseCharge,
+    serviceDate: documents.serviceDate,
+    servicePeriodFrom: documents.servicePeriodFrom,
+    servicePeriodTo: documents.servicePeriodTo,
+    taxCheck: documents.taxCheck,
     paymentStatus: documents.paymentStatus,
     paidAt: documents.paidAt,
     createdAt: documents.createdAt,
@@ -411,6 +422,15 @@ export function createDrizzleDocumentRepository(db: DbExecutor): DocumentReposit
           paymentIban: input.paymentIban,
           paymentReference: input.paymentReference,
           paidNote: input.paidNote,
+          taxBreakdown: input.taxBreakdown,
+          netTotalCents: input.netTotalCents,
+          taxTotalCents: input.taxTotalCents,
+          passThroughCents: input.passThroughCents,
+          reverseCharge: input.reverseCharge,
+          serviceDate: input.serviceDate,
+          servicePeriodFrom: input.servicePeriodFrom,
+          servicePeriodTo: input.servicePeriodTo,
+          taxCheck: input.taxCheck,
           kind: input.kind,
           paymentStatus: input.paymentStatus,
           paidAt: null,
@@ -581,6 +601,72 @@ export function createDrizzleDocumentRepository(db: DbExecutor): DocumentReposit
         .where(and(eq(documents.workspaceId, workspaceId), sql`${documentEffectiveDate} between ${from}::date and ${to}::date`))
         .orderBy(asc(documentEffectiveDate), asc(documents.id));
       return rows as ClosingDocumentRow[];
+    },
+
+    async listForLedger(workspaceId, from, to) {
+      const rows = await db
+        .select({
+          id: documents.id,
+          kind: sql<LedgerDocumentRow["kind"]>`coalesce(documents.manual_kind, documents.kind)`,
+          direction: documents.direction,
+          status: documents.status,
+          documentDate: documents.documentDate,
+          effectiveDate: sql<string>`to_char(${documentEffectiveDate}, 'YYYY-MM-DD')`,
+          title: documents.title,
+          sender: documents.sender,
+          originalFileName: documents.originalFileName,
+          invoiceNumber: documents.invoiceNumber,
+          totalAmountCents: documents.totalAmountCents,
+          currency: documents.currency,
+          platform: documents.platform,
+          paymentStatus: effectivePaymentStatus,
+          taxBreakdown: documents.taxBreakdown,
+          netTotalCents: documents.netTotalCents,
+          taxTotalCents: documents.taxTotalCents,
+          passThroughCents: documents.passThroughCents,
+          reverseCharge: documents.reverseCharge,
+          serviceDate: documents.serviceDate,
+          servicePeriodFrom: documents.servicePeriodFrom,
+          servicePeriodTo: documents.servicePeriodTo,
+          taxCheck: documents.taxCheck,
+          // The counterparty contact, picked exactly like `counterpartyName` above (a correlated
+          // subquery, oldest link first, so a document with two contacts in the same role still
+          // yields one row). One json object rather than four subqueries; the contact's own
+          // `workspace_id` is checked as well, so a link can never surface another workspace's
+          // contact even if one were ever written.
+          contact: sql<{ id: string; name: string; vatId: string | null; country: string | null } | null>`(
+            select json_build_object('id', c.id, 'name', c.name, 'vatId', c.vat_id, 'country', c.country)
+            from document_contacts dc
+            join contacts c on c.id = dc.contact_id
+            where dc.document_id = documents.id
+              and c.workspace_id = documents.workspace_id
+              and dc.role = case when documents.direction = 'outgoing' then 'recipient' else 'sender' end
+            order by dc.created_at, c.name
+            limit 1
+          )`,
+          confirmedTransactions: sql<LedgerDocumentLinkedTransaction[]>`coalesce((
+            select json_agg(json_build_object(
+              'transactionId', t.id,
+              'allocatedAmountCents', dt.allocated_amount_cents
+            ) order by t.booking_date, t.id)
+            from document_transactions dt
+            join transactions t on t.id = dt.transaction_id
+            where dt.document_id = documents.id
+              and dt.workspace_id = documents.workspace_id
+              and dt.status = 'confirmed'
+          ), '[]'::json)`,
+        })
+        .from(documents)
+        .where(and(eq(documents.workspaceId, workspaceId), ...effectiveDateRangeConditions({ from, to })))
+        .orderBy(asc(documentEffectiveDate), asc(documents.id));
+
+      return rows.map(({ contact, ...row }) => ({
+        ...row,
+        contactId: contact?.id ?? null,
+        contactName: contact?.name ?? null,
+        contactVatId: contact?.vatId ?? null,
+        contactCountry: contact?.country ?? null,
+      }));
     },
   };
 }

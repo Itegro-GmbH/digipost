@@ -23,6 +23,7 @@ vi.mock("next/cache", () => ({
   revalidatePath: () => {},
 }));
 
+import { EMPTY_TAX_FIELDS } from "@/modules/documents";
 import { getDb } from "@/persistence/foundation/client";
 import { getRequestServices } from "@/persistence/composition/request-services";
 import { createDrizzleDocumentRepository } from "@/persistence/repositories/drizzle/documents-repository";
@@ -133,6 +134,8 @@ async function createInvoiceDocument(
     paymentIban: null,
     paymentReference: null,
     paidNote: null,
+    ...EMPTY_TAX_FIELDS,
+    taxCheck: null,
     kind: input.direction === "outgoing" ? "outgoing_invoice" : "incoming_invoice",
     paymentStatus: "open",
   } satisfies MarkDocumentDoneInput);

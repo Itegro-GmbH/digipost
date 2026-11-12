@@ -53,7 +53,7 @@ export type {
   WorkspaceRepository,
   WorkspaceRow,
 } from "./workspaces-repository";
-export { DOCUMENT_DIRECTIONS, DOCUMENT_INTAKE_STATUSES, DOCUMENT_KINDS, DOCUMENT_STATUSES } from "./documents-repository";
+export { DOCUMENT_DIRECTIONS, DOCUMENT_INTAKE_STATUSES, DOCUMENT_KINDS, DOCUMENT_STATUSES, DOCUMENT_TAX_CHECK_RESULTS } from "./documents-repository";
 export type {
   ClosingDocumentCounts,
   ClosingDocumentRow,
@@ -68,6 +68,11 @@ export type {
   DocumentStatus,
   DocumentWithRelations,
   DocumentSummaryRow,
+  DocumentTaxBreakdownEntry,
+  DocumentTaxCheck,
+  DocumentTaxFields,
+  LedgerDocumentLinkedTransaction,
+  LedgerDocumentRow,
   ListDocumentsFilter,
   ListDocumentsResult,
   MarkDocumentDoneInput,

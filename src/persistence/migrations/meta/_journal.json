@@ -218,6 +218,13 @@
       "when": 1794499935427,
       "tag": "0030_ledger_filing_lock",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1794502400869,
+      "tag": "0031_document_tax_fields",
+      "breakpoints": true
     }
   ]
 }

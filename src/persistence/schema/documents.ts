@@ -12,7 +12,7 @@
 // generated column's expression is emitted verbatim into the migration, and referencing a
 // sibling column through `t.title` is not meaningful while the table object is still being
 // constructed.
-import { check, customType, date, index, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, check, customType, date, index, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 import { DOCUMENT_KINDS, SETTLEMENT_PLATFORMS } from "@/modules/intake";
@@ -52,6 +52,25 @@ export type DocumentDirection = (typeof DOCUMENT_DIRECTIONS)[number];
  * decisions/0020's "Context"). */
 export const DOCUMENT_INTAKE_STATUSES = ["pending_confirmation", "confirmed", "rejected", "not_applicable"] as const;
 export type DocumentIntakeStatus = (typeof DOCUMENT_INTAKE_STATUSES)[number];
+
+/** decisions/0080-ledger-double-entry-bookkeeping.md, phase 2: one VAT rate's net and tax
+ * amount exactly as an invoice prints them ("Netto 19 %: 107,88 EUR", "USt 19 %: 20,50 EUR").
+ * Either amount is `null` when only the other one is printed: the code never computes a
+ * missing amount (the ledger's proposal engine decides what to do with a gap). Both are signed
+ * cents, negative on a credit note, like `total_amount_cents`. */
+export type DocumentTaxBreakdownEntry = {
+  /** E.g. `19`, `7`, `0`, `5.5`: at most two decimals, 0 to 100. */
+  ratePercent: number;
+  netCents: number | null;
+  taxCents: number | null;
+};
+
+/** decisions/0080, phase 2: the result of comparing the printed tax figures with each other and
+ * with the printed total (`@/modules/documents`'s `checkTaxConsistency`). `null` when there was
+ * nothing to compare. An `inconsistent` document keeps every printed number as printed: the flag
+ * tells a human (and the ledger) to look, the code never "corrects" a figure. */
+export const DOCUMENT_TAX_CHECK_RESULTS = ["consistent", "inconsistent"] as const;
+export type DocumentTaxCheck = (typeof DOCUMENT_TAX_CHECK_RESULTS)[number];
 
 const tsvector = customType<{ data: string }>({
   dataType() {
@@ -135,6 +154,27 @@ export const documents = pgTable(
     paymentIban: text(),
     paymentReference: text(),
     paidNote: text(),
+    // decisions/0080-ledger-double-entry-bookkeeping.md, phase 2: the tax data a booking needs,
+    // all nullable and all `null` for a document processed before these columns existed (no
+    // reprocessing). Amounts are parsed in code from the printed text, exactly like
+    // `total_amount_cents`; the breakdown is one jsonb array (one entry per printed VAT rate)
+    // rather than a child table, because it is only ever read and written together with its
+    // document. The supplier's VAT id and country are NOT duplicated here: they live on the
+    // linked contact (`contacts.vat_id`/`country`), which `listForLedger` reads.
+    taxBreakdown: jsonb().$type<DocumentTaxBreakdownEntry[]>(),
+    netTotalCents: integer(),
+    taxTotalCents: integer(),
+    // "Durchlaufende Posten" / "Auslagen ohne USt" (e.g. a notary's court fees passed through).
+    passThroughCents: integer(),
+    // `true` when the invoice says the recipient owes the VAT (reverse charge, "Steuerschuldnerschaft
+    // des Leistungsempfängers", ZUGFeRD category `AE`); `false` only when stated so explicitly;
+    // `null` when nothing was said.
+    reverseCharge: boolean(),
+    // "Leistungsdatum" (one day) or "Leistungszeitraum" (from/to), ISO dates.
+    serviceDate: date({ mode: "string" }),
+    servicePeriodFrom: date({ mode: "string" }),
+    servicePeriodTo: date({ mode: "string" }),
+    taxCheck: text({ enum: DOCUMENT_TAX_CHECK_RESULTS }),
     // F3b (decisions/0025-payment-matching-wiring.md): a stored, denormalized projection of
     // this document's own payment-matching state (`@/modules/payments`'s `PaymentStatus`) -
     // recomputed by `PaymentsUseCases` whenever a matching decision actually happens
@@ -187,5 +227,6 @@ export const documents = pgTable(
       "documents_payment_status_check",
       sql`${t.paymentStatus} in ('open', 'partially_paid', 'paid', 'overdue', 'settled', 'no_document_needed', 'not_applicable')`,
     ),
+    check("documents_tax_check_check", sql`${t.taxCheck} is null or ${t.taxCheck} in ('consistent', 'inconsistent')`),
   ],
 );

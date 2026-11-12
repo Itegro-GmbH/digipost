@@ -184,6 +184,55 @@ describe("createFakeDocumentAnalyzer.analyzeGuided", () => {
   });
 });
 
+// decisions/0080-ledger-double-entry-bookkeeping.md, phase 2: the fake prints and reads the tax
+// lines the same way the real model is asked to, so the whole pipeline is testable offline.
+describe("createFakeDocumentAnalyzer's tax fields", () => {
+  const analyzer = createFakeDocumentAnalyzer();
+  const ocrEngine = createFakeOcrEngine();
+  const plan: CounterpartyPlan = { mode: "derived", ourRole: "recipient", counterpartyRole: "sender", relationType: "supplier" };
+
+  it("reads the Telekom invoice's 19 % breakdown and service period", async () => {
+    const ocr = await ocrEngine.recognize({ pdfBytes: new Uint8Array(), fileName: "rechnung-telekom.pdf" });
+    const result = await analyzer.analyzeGuided({ text: joinOcrText(ocr.pages), fileName: "rechnung-telekom.pdf", ownCompany: null, kind: "incoming_invoice", plan });
+    expect(result.invoice).toMatchObject({
+      totalAmountCents: 4999,
+      taxBreakdown: [{ ratePercent: 19, netCents: 4201, taxCents: 798 }],
+      reverseCharge: false,
+      servicePeriodFrom: "2026-03-01",
+      servicePeriodTo: "2026-03-31",
+      passThroughCents: null,
+    });
+  });
+
+  it("reads a reverse-charge invoice's zero rate, note and service date", async () => {
+    const ocr = await ocrEngine.recognize({ pdfBytes: new Uint8Array(), fileName: "rechnung-reverse-charge.pdf" });
+    const result = await analyzer.analyzeGuided({ text: joinOcrText(ocr.pages), fileName: "rechnung-reverse-charge.pdf", ownCompany: null, kind: "incoming_invoice", plan });
+    expect(result.counterparty).toMatchObject({ name: "Werbeplattform Ireland Ltd", vatId: "IE9692928F" });
+    expect(result.invoice).toMatchObject({
+      totalAmountCents: 1300,
+      taxBreakdown: [{ ratePercent: 0, netCents: 1300, taxCents: null }],
+      reverseCharge: true,
+      serviceDate: "2026-06-30",
+    });
+  });
+
+  it("reads pass-through costs and printed totals from a notary-like text", async () => {
+    const text = [
+      "Notariat Muster",
+      "Rechnung",
+      "Rechnungsnummer N-17",
+      "Nettobetrag: 677,98 EUR",
+      "Netto 19 %: 677,98 EUR",
+      "USt 19 %: 128,82 EUR",
+      "USt gesamt: 128,82 EUR",
+      "Durchlaufende Posten: 9,00 EUR",
+      "Rechnungsbetrag: 815,80 EUR",
+    ].join("\n\n");
+    const result = await analyzer.analyzeGuided({ text, fileName: "notar.pdf", ownCompany: null, kind: "incoming_invoice", plan });
+    expect(result.invoice).toMatchObject({ netTotalCents: 67798, taxTotalCents: 12882, passThroughCents: 900, totalAmountCents: 81580 });
+  });
+});
+
 /** Pulls the same `IBAN: ...` label the fake OCR's own invoice-shaped fixtures print (see
  * `core/fake-document-analyzer.ts`'s own `extractLabeled` for the production equivalent) - kept
  * local to this test file since it is only needed to make the reminder-direction tests above
