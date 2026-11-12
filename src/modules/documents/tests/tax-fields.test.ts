@@ -123,6 +123,21 @@ describe("detectReverseChargeNote", () => {
     expect(detectReverseChargeNote(text)).toBe(true);
   });
 
+  it.each([
+    "Es liegt keine Steuerschuldnerschaft des Leistungsempfängers vor.",
+    "Kein Reverse Charge, USt 19 %: 7,98 EUR",
+    "Die Steuer schuldet nicht der Leistungsempfänger (nicht § 13b UStG).",
+    "No reverse charge applies to this invoice.",
+    "This supply is not subject to reverse charge.",
+  ])("ignores the negated %j", (text) => {
+    expect(detectReverseChargeNote(text)).toBe(false);
+  });
+
+  it("still finds a note after a negated one elsewhere on the page", () => {
+    expect(detectReverseChargeNote("Kein Skonto.\nSteuerschuldnerschaft des Leistungsempfängers")).toBe(true);
+    expect(detectReverseChargeNote("Keine Lieferung ins Ausland. Reverse Charge gemäß § 13b UStG.")).toBe(true);
+  });
+
   it("finds nothing in an ordinary invoice", () => {
     expect(detectReverseChargeNote("Rechnung\nNetto 19 %: 42,01 EUR\nUSt 19 %: 7,98 EUR")).toBe(false);
     expect(detectReverseChargeNote(null)).toBe(false);

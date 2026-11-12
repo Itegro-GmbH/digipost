@@ -100,10 +100,27 @@ export function toReverseChargeAnswer(value: unknown): boolean | null {
  * UStG, its English and French equivalents, and the EU VAT directive's article 196. Matched on
  * the OCR text in code, so a model that misses the note cannot lose it. */
 const REVERSE_CHARGE_NOTE_RE =
-  /reverse[\s-]*charge|steuerschuldnerschaft\s+des\s+leistungsempf(?:ä|ae)ngers|§\s*13\s?b\b|autoliquidation|\bart(?:icle|\.)?\s*196\b/i;
+  /reverse[\s-]*charge|steuerschuldnerschaft\s+des\s+leistungsempf(?:ä|ae)ngers|§\s*13\s?b\b|autoliquidation|\bart(?:icle|\.)?\s*196\b/gi;
+
+/** A negation right before a note ("keine Steuerschuldnerschaft des Leistungsempfängers", "no
+ * reverse charge", "nicht § 13b"): looked for in the same clause, at most this many characters
+ * back, so a negation elsewhere on the page does not cancel a real note. */
+const NEGATION_WINDOW = 25;
+const NEGATION_RE = /\b(?:kein|keine|keinen|keiner|nicht|ohne|no|not|non)\b/i;
+const CLAUSE_BOUNDARY_RE = /[.\n;:!?,]/;
+
+function isNegated(text: string, matchIndex: number): boolean {
+  const before = text.slice(Math.max(0, matchIndex - NEGATION_WINDOW), matchIndex);
+  const clause = before.split(CLAUSE_BOUNDARY_RE).pop() ?? "";
+  return NEGATION_RE.test(clause);
+}
 
 export function detectReverseChargeNote(text: string | null | undefined): boolean {
-  return text ? REVERSE_CHARGE_NOTE_RE.test(text) : false;
+  if (!text) return false;
+  for (const match of text.matchAll(REVERSE_CHARGE_NOTE_RE)) {
+    if (!isNegated(text, match.index)) return true;
+  }
+  return false;
 }
 
 function toIsoDateOrNull(value: unknown): string | null {
