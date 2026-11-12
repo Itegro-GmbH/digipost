@@ -1,0 +1,1 @@
+ALTER TABLE "documents" ADD COLUMN "tax_backfill_requested_at" timestamp with time zone;

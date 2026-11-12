@@ -43,9 +43,9 @@ describe("LedgerUseCases.scheduleSync", () => {
 });
 
 describe("job handlers", () => {
-  function handlers(ledger: Partial<LedgerUseCases>, payments: Record<string, unknown> = {}) {
+  function handlers(ledger: Partial<LedgerUseCases>, payments: Record<string, unknown> = {}, documents: Record<string, unknown> = {}) {
     return createJobHandlers({
-      documents: {} as never,
+      documents: documents as never,
       billing: {} as never,
       workspaces: {} as never,
       accounts: {} as never,
@@ -81,6 +81,16 @@ describe("job handlers", () => {
     await h[JOB_KINDS.ledgerSync]!({ workspaceId: WS });
     await h[JOB_KINDS.ledgerSync]!({ workspaceId: WS });
     expect(syncProposals).toHaveBeenCalledWith({ workspaceId: WS });
+    expect(scheduleSync).toHaveBeenCalledTimes(1);
+  });
+
+  it("schedules the ledger sync after a backfilled document got tax fields, not when it got none", async () => {
+    const scheduleSync = vi.fn().mockResolvedValue(true);
+    const backfillDocumentTaxFields = vi.fn().mockResolvedValueOnce({ filled: true }).mockResolvedValueOnce({ filled: false });
+    const h = handlers({ scheduleSync }, {}, { backfillDocumentTaxFields });
+    await h[JOB_KINDS.backfillTaxFields]!({ workspaceId: WS, documentId: WS });
+    await h[JOB_KINDS.backfillTaxFields]!({ workspaceId: WS, documentId: WS });
+    expect(backfillDocumentTaxFields).toHaveBeenCalledWith({ workspaceId: WS, documentId: WS });
     expect(scheduleSync).toHaveBeenCalledTimes(1);
   });
 });

@@ -27,6 +27,10 @@ export const EMPTY_TAX_FIELDS: ExtractedTaxFields = {
   servicePeriodTo: null,
 };
 
+/** How many documents one click of "Steuerdaten alter Belege nachträglich erkennen" queues at
+ * most (`../README.md`, "Tax field backfill"); the rest wait for the next click. */
+export const MAX_TAX_BACKFILL_PER_REQUEST = 100;
+
 /** More rates than this on one invoice is not a real invoice (Germany has two plus zero). */
 export const MAX_TAX_BREAKDOWN_ENTRIES = 6;
 

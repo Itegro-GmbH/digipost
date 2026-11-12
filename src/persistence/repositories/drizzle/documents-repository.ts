@@ -2,7 +2,7 @@
 // access only: no validation, no status transitions, no external calls
 // (WEBAPP_TEMPLATE_SPEC.md §5.3). Every workspace-scoped method takes `workspaceId` and
 // filters on it explicitly.
-import { and, asc, desc, eq, inArray, lt, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne, or, sql, type SQL } from "drizzle-orm";
 
 import type { DateRange } from "@/shared/date-range";
 import type { DbExecutor } from "@/persistence/foundation/db-types";
@@ -17,6 +17,7 @@ import type {
   LedgerDocumentRow,
   ListDocumentsFilter,
 } from "@/persistence/repositories/contracts/documents-repository";
+import { TAX_BACKFILL_KINDS } from "@/persistence/repositories/contracts/documents-repository";
 
 // F3b (decisions/0025-payment-matching-wiring.md): the SQL mirror of `@/modules/payments`'s
 // `resolveDisplayStatus` - a stored `open`/`partially_paid` row whose due date has already
@@ -206,6 +207,7 @@ export function createDrizzleDocumentRepository(db: DbExecutor): DocumentReposit
     servicePeriodFrom: documents.servicePeriodFrom,
     servicePeriodTo: documents.servicePeriodTo,
     taxCheck: documents.taxCheck,
+    taxBackfillRequestedAt: documents.taxBackfillRequestedAt,
     paymentStatus: documents.paymentStatus,
     paidAt: documents.paidAt,
     createdAt: documents.createdAt,
@@ -669,5 +671,75 @@ export function createDrizzleDocumentRepository(db: DbExecutor): DocumentReposit
         contactCountry: contact?.country ?? null,
       }));
     },
+
+    async countTaxBackfillCandidates(workspaceId) {
+      const [row] = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(documents)
+        .where(taxBackfillCandidateCondition(workspaceId));
+      return row?.count ?? 0;
+    },
+
+    async markTaxBackfillRequested(workspaceId, { limit, now }) {
+      if (limit <= 0) return [];
+      const picked = db
+        .select({ id: documents.id })
+        .from(documents)
+        .where(taxBackfillCandidateCondition(workspaceId))
+        .orderBy(asc(documents.createdAt), asc(documents.id))
+        .limit(limit)
+        .for("update", { skipLocked: true });
+      const rows = await db
+        .update(documents)
+        .set({ taxBackfillRequestedAt: now })
+        .where(and(eq(documents.workspaceId, workspaceId), inArray(documents.id, picked)))
+        .returning({ id: documents.id });
+      return rows.map((row) => row.id);
+    },
+
+    async fillEmptyTaxFields(workspaceId, id, fields) {
+      const rows = await db
+        .update(documents)
+        .set({
+          taxBreakdown: fields.taxBreakdown,
+          netTotalCents: fields.netTotalCents,
+          taxTotalCents: fields.taxTotalCents,
+          passThroughCents: fields.passThroughCents,
+          reverseCharge: fields.reverseCharge,
+          serviceDate: fields.serviceDate,
+          servicePeriodFrom: fields.servicePeriodFrom,
+          servicePeriodTo: fields.servicePeriodTo,
+          taxCheck: fields.taxCheck,
+        })
+        .where(and(eq(documents.workspaceId, workspaceId), eq(documents.id, id), allTaxFieldsEmpty))
+        .returning({ id: documents.id });
+      return rows.length > 0;
+    },
   };
+}
+
+/** Every tax field of decisions/0080 phase 2 still unset. */
+const allTaxFieldsEmpty = and(
+  isNull(documents.taxBreakdown),
+  isNull(documents.netTotalCents),
+  isNull(documents.taxTotalCents),
+  isNull(documents.passThroughCents),
+  isNull(documents.reverseCharge),
+  isNull(documents.serviceDate),
+  isNull(documents.servicePeriodFrom),
+  isNull(documents.servicePeriodTo),
+  isNull(documents.taxCheck),
+);
+
+/** A document the tax field backfill may queue (`countTaxBackfillCandidates`'s contract). */
+function taxBackfillCandidateCondition(workspaceId: string): SQL | undefined {
+  return and(
+    eq(documents.workspaceId, workspaceId),
+    eq(documents.status, "done"),
+    inArray(sql`coalesce(${documents.manualKind}, ${documents.kind})`, [...TAX_BACKFILL_KINDS]),
+    isNotNull(documents.totalAmountCents),
+    isNotNull(documents.ocrText),
+    isNull(documents.taxBackfillRequestedAt),
+    allTaxFieldsEmpty,
+  );
 }

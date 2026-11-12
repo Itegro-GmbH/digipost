@@ -644,6 +644,9 @@ describe("createDocumentUseCases", () => {
           analyze: () => {
             throw new Error("analyze is no longer called by processOcrDocument since decisions/0036's wave 2");
           },
+          extractTaxFields: () => {
+            throw new Error("extractTaxFields is only called by the tax field backfill");
+          },
           analyzeGuided: async ({ plan }) => {
             // The whole point of guided extraction: `processOcrDocument` must have classified
             // `outgoing_invoice` and derived the plan BEFORE calling the analyzer at all.
@@ -725,6 +728,9 @@ describe("createDocumentUseCases", () => {
           analyze: () => {
             throw new Error("analyze is no longer called by processOcrDocument since decisions/0036's wave 2");
           },
+          extractTaxFields: () => {
+            throw new Error("extractTaxFields is only called by the tax field backfill");
+          },
           analyzeGuided: async () => ({
             title: "Rechnung",
             sender: "Lieferant GmbH",
@@ -782,6 +788,9 @@ describe("createDocumentUseCases", () => {
         const reminderAnalyzer: DocumentAnalyzer = {
           analyze: () => {
             throw new Error("analyze is no longer called by processOcrDocument since decisions/0036's wave 2");
+          },
+          extractTaxFields: () => {
+            throw new Error("extractTaxFields is only called by the tax field backfill");
           },
           analyzeGuided: async () => ({
             title: "Zahlungserinnerung",
@@ -846,6 +855,9 @@ describe("createDocumentUseCases", () => {
           const settlementAnalyzer: DocumentAnalyzer = {
             analyze: () => {
               throw new Error("analyze is no longer called by processOcrDocument since decisions/0036's wave 2");
+            },
+            extractTaxFields: () => {
+              throw new Error("extractTaxFields is only called by the tax field backfill");
             },
             analyzeGuided: async () => ({
               title: "Auszahlungsbericht",
@@ -1619,6 +1631,137 @@ describe("createDocumentUseCases", () => {
       expect(updated.kind).toBe("reminder");
       expect(updated.paymentStatus).toBe("not_applicable");
       expect(jobState.filter((j) => j.kind === "match-payments")).toHaveLength(0);
+    });
+  });
+
+  // The tax field backfill (src/modules/documents/README.md, "Tax field backfill"): documents
+  // processed before decisions/0080 phase 2 get their tax fields, and nothing else, once.
+  describe("tax field backfill", () => {
+    const TELEKOM_OCR = [
+      "Telekom Deutschland GmbH",
+      "Rechnung",
+      "Rechnungsnummer 4711",
+      "Rechnungsbetrag: 49,99 EUR",
+      "Netto 19 %: 42,01 EUR",
+      "USt 19 %: 7,98 EUR",
+      "Leistungszeitraum: 01.03.2026 bis 31.03.2026",
+    ].join("\n");
+
+    function oldInvoice(workspaceId: string, overrides: Partial<Parameters<typeof documentRow>[0]> = {}) {
+      return documentRow({
+        workspaceId,
+        storageKey: `workspaces/${workspaceId}/documents/${crypto.randomUUID()}/original.pdf`,
+        kind: "incoming_invoice",
+        status: "done",
+        title: "Rechnung Telekom",
+        totalAmountCents: 4999,
+        ocrText: TELEKOM_OCR,
+        ...overrides,
+      });
+    }
+
+    it("queues only invoice-like documents without any tax field, once, one job each", async () => {
+      const workspace = workspaceRow({ name: "Muster GmbH" });
+      const candidate = oldInvoice(workspace.id);
+      const receipt = oldInvoice(workspace.id, { kind: "receipt" });
+      const filled = oldInvoice(workspace.id, { reverseCharge: false });
+      const letter = oldInvoice(workspace.id, { kind: "letter" });
+      const noAmount = oldInvoice(workspace.id, { kind: "authority_letter", totalAmountCents: null });
+      const failed = oldInvoice(workspace.id, { status: "failed" });
+      const other = oldInvoice("other-workspace");
+      const { useCases, jobState } = setup({ workspaces: [workspace], documents: [candidate, receipt, filled, letter, noAmount, failed, other] });
+
+      expect(await useCases.countTaxFieldBackfillCandidates(workspace.id)).toBe(2);
+      expect(await useCases.requestTaxFieldBackfill({ workspaceId: workspace.id })).toEqual({ queued: 2, remaining: 0 });
+      expect(jobState.map((job) => [job.kind, (job.payload as { documentId: string }).documentId]).sort()).toEqual(
+        [
+          ["backfill-tax-fields", candidate.id],
+          ["backfill-tax-fields", receipt.id],
+        ].sort(),
+      );
+
+      // A second click queues nothing.
+      expect(await useCases.requestTaxFieldBackfill({ workspaceId: workspace.id })).toEqual({ queued: 0, remaining: 0 });
+      expect(jobState).toHaveLength(2);
+    });
+
+    it("queues at most 100 per click and reports the rest", async () => {
+      const workspace = workspaceRow({ name: "Muster GmbH" });
+      const documents = Array.from({ length: 103 }, () => oldInvoice(workspace.id));
+      const { useCases, jobState } = setup({ workspaces: [workspace], documents });
+      expect(await useCases.requestTaxFieldBackfill({ workspaceId: workspace.id })).toEqual({ queued: 100, remaining: 3 });
+      expect(jobState).toHaveLength(100);
+      expect(await useCases.requestTaxFieldBackfill({ workspaceId: workspace.id })).toEqual({ queued: 3, remaining: 0 });
+    });
+
+    it("fills only the tax fields from the stored text and changes nothing else", async () => {
+      const workspace = workspaceRow({ name: "Muster GmbH" });
+      const doc = oldInvoice(workspace.id, { originalFileName: "telekom.pdf", mimeType: "image/jpeg" });
+      const { useCases, documentState } = setup({ workspaces: [workspace], documents: [doc] });
+      const before = { ...documentState[0]! };
+
+      expect(await useCases.backfillDocumentTaxFields({ workspaceId: workspace.id, documentId: doc.id })).toEqual({ filled: true });
+
+      const after = documentState[0]!;
+      expect(after).toMatchObject({
+        taxBreakdown: [{ ratePercent: 19, netCents: 4201, taxCents: 798 }],
+        servicePeriodFrom: "2026-03-01",
+        servicePeriodTo: "2026-03-31",
+        reverseCharge: false,
+        taxCheck: "consistent",
+      });
+      const taxKeys = new Set(["taxBreakdown", "netTotalCents", "taxTotalCents", "passThroughCents", "reverseCharge", "serviceDate", "servicePeriodFrom", "servicePeriodTo", "taxCheck"]);
+      for (const key of Object.keys(before) as (keyof typeof before)[]) {
+        if (!taxKeys.has(key)) expect(after[key]).toEqual(before[key]);
+      }
+    });
+
+    it("never overwrites a document whose tax fields were filled meanwhile, and asks no model then", async () => {
+      const workspace = workspaceRow({ name: "Muster GmbH" });
+      const doc = oldInvoice(workspace.id, { taxTotalCents: 100 });
+      const extractTaxFields = vi.fn();
+      const { useCases, documentState } = setup({ workspaces: [workspace], documents: [doc], analyzer: { ...createFakeDocumentAnalyzer(), extractTaxFields } });
+      expect(await useCases.backfillDocumentTaxFields({ workspaceId: workspace.id, documentId: doc.id })).toEqual({ filled: false });
+      expect(extractTaxFields).not.toHaveBeenCalled();
+      expect(documentState[0]).toMatchObject({ taxTotalCents: 100, taxBreakdown: null });
+    });
+
+    it("reads an embedded ZUGFeRD XML without asking the model", async () => {
+      const workspace = workspaceRow({ name: "Muster GmbH" });
+      const doc = oldInvoice(workspace.id, { totalAmountCents: 5000 });
+      const extractTaxFields = vi.fn();
+      const { useCases, documentState, storage } = setup({ workspaces: [workspace], documents: [doc], analyzer: { ...createFakeDocumentAnalyzer(), extractTaxFields } });
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<rsm:CrossIndustryInvoice xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100" xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100">
+  <rsm:ExchangedDocument><ram:ID>4711</ram:ID></rsm:ExchangedDocument>
+  <rsm:SupplyChainTradeTransaction>
+    <ram:ApplicableHeaderTradeSettlement>
+      <ram:InvoiceCurrencyCode>EUR</ram:InvoiceCurrencyCode>
+      <ram:ApplicableTradeTax><ram:CalculatedAmount>7.98</ram:CalculatedAmount><ram:TypeCode>VAT</ram:TypeCode><ram:BasisAmount>42.02</ram:BasisAmount><ram:CategoryCode>S</ram:CategoryCode><ram:RateApplicablePercent>19</ram:RateApplicablePercent></ram:ApplicableTradeTax>
+      <ram:SpecifiedTradeSettlementHeaderMonetarySummation><ram:TaxBasisTotalAmount>42.02</ram:TaxBasisTotalAmount><ram:TaxTotalAmount currencyID="EUR">7.98</ram:TaxTotalAmount><ram:GrandTotalAmount>50.00</ram:GrandTotalAmount></ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+    </ram:ApplicableHeaderTradeSettlement>
+  </rsm:SupplyChainTradeTransaction>
+</rsm:CrossIndustryInvoice>`;
+      const pdfDoc = await PDFDocument.create();
+      pdfDoc.addPage([595.28, 841.89]);
+      await pdfDoc.attach(new TextEncoder().encode(xml), "factur-x.xml", { mimeType: "application/xml" });
+      await storage.putObject({ key: doc.storageKey, body: await pdfDoc.save(), contentType: "application/pdf" });
+
+      expect(await useCases.backfillDocumentTaxFields({ workspaceId: workspace.id, documentId: doc.id })).toEqual({ filled: true });
+      expect(extractTaxFields).not.toHaveBeenCalled();
+      expect(documentState[0]).toMatchObject({ taxBreakdown: [{ ratePercent: 19, netCents: 4202, taxCents: 798 }], taxTotalCents: 798, taxCheck: "consistent" });
+    });
+
+    it("writes nothing when the model finds no tax figure at all", async () => {
+      const workspace = workspaceRow({ name: "Muster GmbH" });
+      const doc = oldInvoice(workspace.id, { ocrText: "Quittung\nBetrag: 12,00 EUR", mimeType: "image/jpeg" });
+      const { useCases, documentState } = setup({
+        workspaces: [workspace],
+        documents: [doc],
+        analyzer: { ...createFakeDocumentAnalyzer(), extractTaxFields: async () => EMPTY_TAX_FIELDS },
+      });
+      expect(await useCases.backfillDocumentTaxFields({ workspaceId: workspace.id, documentId: doc.id })).toEqual({ filled: false });
+      expect(documentState[0]).toMatchObject({ taxBreakdown: null, reverseCharge: null, taxCheck: null });
     });
   });
 });

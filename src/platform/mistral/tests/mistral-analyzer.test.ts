@@ -196,3 +196,50 @@ describe("createMistralDocumentAnalyzer.analyzeGuided", () => {
     ).rejects.toMatchObject({ code: "ai_rate_limited", transient: true });
   });
 });
+
+// The tax field backfill (`@/modules/documents`' README, "Tax field backfill").
+describe("createMistralDocumentAnalyzer.extractTaxFields", () => {
+  it("asks only for the tax figures, guards the text as data, and parses the printed amounts", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      chatResponse({
+        netTotalAmount: "83,19 EUR",
+        taxTotalAmount: "15,81 EUR",
+        taxBreakdown: [{ rate: "19 %", netAmount: "83,19 EUR", taxAmount: "15,81 EUR" }],
+        passThroughAmount: null,
+        reverseCharge: false,
+        serviceDate: "2026-07-01",
+        servicePeriodFrom: null,
+        servicePeriodTo: null,
+        title: "ignored",
+      }),
+    );
+    const analyzer = createMistralDocumentAnalyzer({ apiKey: "k", model: "mistral-small-latest", fetchImpl });
+
+    const fields = await analyzer.extractTaxFields({ text: "Apple Developer Program 99,00 EUR", fileName: "apple.pdf" });
+
+    const body = JSON.parse((fetchImpl.mock.calls[0] as [string, RequestInit])[1].body as string);
+    expect(body.temperature).toBe(0);
+    expect(body.response_format).toEqual({ type: "json_object" });
+    expect(body.messages[0].content).toContain("ausschließlich die Steuerangaben");
+    expect(body.messages[0].content).toContain('"taxBreakdown"');
+    expect(body.messages[0].content).not.toContain('"invoiceNumber"');
+    expect(body.messages[1].content).toContain("Apple Developer Program 99,00 EUR");
+    expect(fields).toEqual({
+      taxBreakdown: [{ ratePercent: 19, netCents: 8319, taxCents: 1581 }],
+      netTotalCents: 8319,
+      taxTotalCents: 1581,
+      passThroughCents: null,
+      reverseCharge: false,
+      serviceDate: "2026-07-01",
+      servicePeriodFrom: null,
+      servicePeriodTo: null,
+    });
+  });
+
+  it("degrades a malformed answer to every field null", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(chatResponse("not json at all"));
+    const analyzer = createMistralDocumentAnalyzer({ apiKey: "k", model: "mistral-small-latest", fetchImpl });
+    const fields = await analyzer.extractTaxFields({ text: "x", fileName: "x.pdf" });
+    expect(Object.values(fields).every((value) => value === null)).toBe(true);
+  });
+});

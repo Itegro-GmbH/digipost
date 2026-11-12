@@ -7,6 +7,7 @@ import "server-only";
  */
 export {
   countFailedProjection,
+  countTaxFieldBackfillCandidatesProjection,
   countOverduePaymentsProjection,
   countPendingIntakeConfirmationProjection,
   getDocumentDetailProjection,

@@ -14,7 +14,10 @@ Maintenance triggers:
 - A tax code, its USt-VA mapping, or the seed chart changes
 - A new write path touches a ledger table, or a control is added
 - The proposal engine or the UI stage lands (decisions/0080 phases)
-Last verified: 2026-11-12, fixes from the acceptance replay and the review: bank-transaction rules
+Last verified: 2026-11-12, notes after production use (decisions/0080): the settlement template
+nets Google's refunded fees, `tax_unverified` (no reverse charge guessed without printed tax
+figures, `core/tax-evidence.ts`), the advisor prompt's typical accounts, and `TaxBackfillCard`.
+Previously 2026-11-12, fixes from the acceptance replay and the review: bank-transaction rules
 (remittance text, no-document rules only, money direction), the payment fallback for a document
 without an open-item account, cancellations, the commissionaire-only settlement template,
 reverse charge against printed German VAT, rule tax codes by direction, open items at a date, the
@@ -172,7 +175,7 @@ overwrites a booked, dismissed or human-edited entry.
   `AccountSheetTable`, `OpenItemsClient`, `VatPreviewView`, `AdvisorUploadForm`,
   `AdvisorUploadsList`, `AdvisorComparisonTable`, `PeriodsClient`, `FilingConfirmCard`,
   `SettingsGeneralForm`, `ChartSettings`, `RulesSettings`, `RuleForm`, `DocumentLedgerCard`,
-  `LedgerTabs`, `ReportsTabs`, `SettingsTabs`, `PeriodSelect`.
+  `LedgerTabs`, `ReportsTabs`, `SettingsTabs`, `PeriodSelect`, `TaxBackfillCard`.
 - The use cases `countWaitingProposals` (proposals not dismissed, any date) and `getSources`
   (the requested documents and bank transactions through `DocumentRepository.listForLedger` and
   `TransactionRepository.listForLedger`, extracted fields only; an id that is not found is left
@@ -323,8 +326,12 @@ under the shell's wide layout (`src/modules/dashboard-shell`'s `WIDE_LAYOUT_PREF
   advisor. A correcting draft is submitted the same way. The year's annual statement is the last
   row (no Zahllast; it locks the whole year).
 - `/dashboard/buchhaltung/einstellungen` (`SettingsTabs`): Allgemein (`SettingsGeneralForm`: start
-  date, USt-VA period, basis, "Kontenplan aktualisieren", "Buchhaltung ausschalten" behind an
-  inline confirm; nothing is deleted), `/kontenplan` (`ChartSettings`: grouped chart with kind,
+  date, USt-VA period, basis, "Kontenplan aktualisieren", the sections the page passes as
+  children, "Buchhaltung ausschalten" behind an inline confirm; nothing is deleted). Its child
+  `TaxBackfillCard` is "Steuerdaten alter Belege nachträglich erkennen": the documents owner's
+  backfill (`src/modules/documents/README.md`, "Tax field backfill"), its action handed in by the
+  page so this module imports no other owner's actions; it shows the candidates and, after a
+  click, how many documents are being read, `/kontenplan` (`ChartSettings`: grouped chart with kind,
   open items, owner and archived state; a new account with open items and an owner, bank account,
   contact, platform or person, whose type presets kind and group; edit name, description, group
   and open items; archive and restore; the owner options come from `listAccountsOverviewProjection`
@@ -538,3 +545,12 @@ VAT), `tests/reports.test.ts` (the 2970 carry-forward, a match across the cut-of
 the correcting filing flow, concurrent writers on two connections, the unique revision index,
 `bulkBook` and the matching after a booking) and `src/persistence/tests/ledger-use-cases.db.test.ts`
 (the year boundary in the list, the Kontenblatt and the advisor comparison).
+Notes after production use: `tests/proposals.test.ts` ("Google Play fee refunds (July 2026)" and
+"no reverse charge guessed without tax figures": Apple Developer without and with its printed
+83,19 + 15,81, Finom 107,88 + 20,50, Meta with its reverse-charge note, a rule, the template
+default, an AI `rc13b`), `tests/booking-advisor.test.ts` (`taxUnverified`),
+`tests/review-queue-client.test.tsx` (a template proposal with `tax_unverified` under "Bitte
+ansehen"), `tests/tax-backfill-card.test.tsx`, `src/persistence/tests/settlement-reimport.db.test.ts`
+(a misclassified Google report re-imported, its proposal updated) and
+`src/persistence/tests/tax-backfill.db.test.ts` (an Apple Ireland proposal from `tax_unverified`
+to `vst19` after the backfill).

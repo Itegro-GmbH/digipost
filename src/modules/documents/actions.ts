@@ -221,3 +221,26 @@ export async function resetIntakeFingerprintAction(input: unknown): Promise<Acti
   revalidatePath("/dashboard/settings/intake");
   return { status: "success", data: undefined };
 }
+
+/**
+ * "Steuerdaten alter Belege nachträglich erkennen" (`README.md`, "Tax field backfill"): queues
+ * the tax-only re-extraction of up to `MAX_TAX_BACKFILL_PER_REQUEST` older invoices whose tax
+ * fields are all empty. `PERMISSIONS.financeManage` (the button sits in the ledger's settings and
+ * sends documents to the AI on the workspace's behalf); the workspace comes from the session,
+ * never from input. Safe to click twice: a document is queued at most once. The runner starts
+ * after the response; what its time budget leaves is picked up by the next job run.
+ */
+export async function requestTaxFieldBackfillAction(): Promise<ActionResult<{ queued: number; remaining: number }, DocumentActionErrorCode>> {
+  const access = await requirePermission(PERMISSIONS.financeManage);
+  if (access.status === "error") return { status: "error", errorCode: access.errorCode };
+
+  try {
+    const workspaceId = access.access.workspace.id;
+    const result = await getRequestServices().documents.requestTaxFieldBackfill({ workspaceId });
+    if (result.queued > 0) after(() => runDueJobs({ workspaceId, limit: 5, budgetMs: AFTER_RESPONSE_JOB_BUDGET_MS }));
+    revalidatePath("/dashboard/buchhaltung/einstellungen");
+    return { status: "success", data: result };
+  } catch (err) {
+    return { status: "error", errorCode: mapUseCaseError(err) };
+  }
+}

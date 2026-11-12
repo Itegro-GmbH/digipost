@@ -19,8 +19,9 @@
 // adapter's own raw-JSON boundary, already done once for the fake by `validateAnalysisResult`.
 import { normalizeIban, type ExtractedContactData } from "@/modules/contacts";
 
-import { MAX_GUIDED_PARTIES, validateAnalysisResult } from "./analysis-validation";
+import { MAX_GUIDED_PARTIES, validateAnalysisResult, validateTaxFieldsResult } from "./analysis-validation";
 import type { AnalysisResult, DocumentAnalyzer, ExtractedParty, GuidedAnalysisResult, OwnCompanyContext } from "./ports";
+import type { ExtractedTaxFields } from "./tax-fields";
 
 /** Builds one `ExtractedParty` with every field defaulted to `null` except `role`/`name` and
  * whatever `overrides` supplies - avoids repeating all 24 `ExtractedContactData` fields twice
@@ -260,6 +261,12 @@ export function createFakeDocumentAnalyzer(): DocumentAnalyzer {
         invoice: base.invoice,
         reminderDirection,
       };
+    },
+
+    // The tax field backfill: the same printed tax lines the invoice fixtures carry, read off the
+    // text and parsed exactly like the real adapter's answer.
+    async extractTaxFields({ text }): Promise<ExtractedTaxFields> {
+      return validateTaxFieldsResult(extractRawTaxFields(text));
     },
   };
 }

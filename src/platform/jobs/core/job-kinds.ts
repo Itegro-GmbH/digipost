@@ -61,5 +61,12 @@ export const JOB_KINDS = {
    * and `match-settlement-lines` run. Idempotent: proposals are keyed by source and an unchanged
    * one is kept, so a retried or duplicated run writes nothing new. */
   ledgerSync: "ledger-sync",
+  /** decisions/0080's notes after production use: reads ONLY the tax fields of one document
+   * processed before they existed (`DocumentUseCases.backfillDocumentTaxFields`: ZUGFeRD first,
+   * else the AI on the stored OCR text), enqueued one per document by "Steuerdaten alter Belege
+   * nachträglich erkennen" (`requestTaxFieldBackfill`, which marks each document so it is never
+   * queued twice). Idempotent: a document whose tax fields are no longer all empty is skipped,
+   * and the write itself only lands while they still are. */
+  backfillTaxFields: "backfill-tax-fields",
 } as const;
 export type JobKind = (typeof JOB_KINDS)[keyof typeof JOB_KINDS];

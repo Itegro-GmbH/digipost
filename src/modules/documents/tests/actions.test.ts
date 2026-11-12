@@ -29,6 +29,7 @@ const documentsUseCases = {
   confirmIntake: vi.fn(),
   rejectIntake: vi.fn(),
   resetIntakeFingerprint: vi.fn(),
+  requestTaxFieldBackfill: vi.fn(),
 };
 const paymentsUseCases = {
   discardOpenSuggestionsForDocument: vi.fn(),
@@ -49,6 +50,7 @@ import {
   kickProcessingAction,
   reclassifyDocumentAction,
   rejectIntakeAction,
+  requestTaxFieldBackfillAction,
   resetIntakeFingerprintAction,
   retryProcessingAction,
 } from "../actions";
@@ -360,5 +362,33 @@ describe("resetIntakeFingerprintAction", () => {
     expect(result).toEqual({ status: "success", data: undefined });
     expect(documentsUseCases.resetIntakeFingerprint).toHaveBeenCalledWith("w1", DOC_ID);
     expect(revalidatePathMock).toHaveBeenCalledWith("/dashboard/settings/intake");
+  });
+});
+
+// The tax field backfill ("Steuerdaten alter Belege nachträglich erkennen", README "Tax field
+// backfill"): admin-only, the caller's own workspace, the runner started after the response.
+describe("requestTaxFieldBackfillAction", () => {
+  it("requires finance.manage and forwards a forbidden result", async () => {
+    vi.mocked(requirePermission).mockResolvedValue({ status: "error", errorCode: "forbidden" });
+    expect(await requestTaxFieldBackfillAction()).toEqual({ status: "error", errorCode: "forbidden" });
+    expect(requirePermission).toHaveBeenCalledWith(PERMISSIONS.financeManage);
+    expect(documentsUseCases.requestTaxFieldBackfill).not.toHaveBeenCalled();
+  });
+
+  it("queues for the caller's own workspace, kicks the runner and returns the counts", async () => {
+    vi.mocked(requirePermission).mockResolvedValue(ACCESS);
+    documentsUseCases.requestTaxFieldBackfill.mockResolvedValue({ queued: 12, remaining: 0 });
+    expect(await requestTaxFieldBackfillAction()).toEqual({ status: "success", data: { queued: 12, remaining: 0 } });
+    expect(documentsUseCases.requestTaxFieldBackfill).toHaveBeenCalledWith({ workspaceId: "w1" });
+    await afterMock.mock.calls[0]![0]();
+    expect(runDueJobsMock).toHaveBeenCalledWith({ workspaceId: "w1", limit: 5, budgetMs: AFTER_RESPONSE_JOB_BUDGET_MS });
+    expect(revalidatePathMock).toHaveBeenCalledWith("/dashboard/buchhaltung/einstellungen");
+  });
+
+  it("starts no runner when nothing was queued", async () => {
+    vi.mocked(requirePermission).mockResolvedValue(ACCESS);
+    documentsUseCases.requestTaxFieldBackfill.mockResolvedValue({ queued: 0, remaining: 0 });
+    await requestTaxFieldBackfillAction();
+    expect(afterMock).not.toHaveBeenCalled();
   });
 });

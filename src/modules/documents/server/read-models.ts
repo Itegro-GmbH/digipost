@@ -215,3 +215,8 @@ export const countOverduePaymentsProjection = cache(async (workspaceId: string):
   return getRequestServices().documents.countOverduePayments(workspaceId);
 });
 
+/** "Steuerdaten alter Belege nachträglich erkennen": how many older invoices still lack every
+ * tax field and were never queued. The caller checks `finance.read`. */
+export const countTaxFieldBackfillCandidatesProjection = cache(async (workspaceId: string): Promise<number> => {
+  return getRequestServices().documents.countTaxFieldBackfillCandidates(workspaceId);
+});

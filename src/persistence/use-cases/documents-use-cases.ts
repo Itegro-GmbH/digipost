@@ -52,6 +52,7 @@ import {
   nonOwnParties,
   parseIntakeResult,
   planCounterparty,
+  MAX_TAX_BACKFILL_PER_REQUEST,
   resolveDocumentTaxFields,
   resolvePaymentIban,
   resolveLinkRoles,
@@ -283,6 +284,9 @@ export type ImportAccountTransactionsInput = { workspaceId: string; documentId: 
  * queue's own retry/backoff applies to each deletion independently. */
 export type PurgeRejectedIntakeInput = { workspaceId: string; documentId: string };
 
+/** The `backfill-tax-fields` job's payload: one document whose tax fields are re-read. */
+export type BackfillTaxFieldsInput = { workspaceId: string; documentId: string };
+
 /** decisions/0079-outgoing-invoices.md: what `createForIssuedInvoice` needs about an invoice
  * Digipost itself just issued. Every value comes from the issued invoice, never from OCR. */
 export type IssuedInvoiceDocumentInput = {
@@ -418,6 +422,19 @@ export interface DocumentUseCases {
    * Open payment suggestions are NOT touched here (`document_transactions` belongs to
    * `src/modules/payments`): the caller clears them through `PaymentsUseCases`. */
   reclassifyDocument(input: { workspaceId: string; documentId: string; kind: DocumentKind }): Promise<void>;
+  /** "Steuerdaten alter Belege nachträglich erkennen" (src/modules/documents/README.md, "Tax
+   * field backfill"): marks up to `MAX_TAX_BACKFILL_PER_REQUEST` invoice-like documents whose tax
+   * fields are all empty and that were never queued, and enqueues one `backfill-tax-fields` job
+   * per document, in one transaction. A second click queues only documents not queued before.
+   * `remaining`: candidates still waiting for a later click. */
+  requestTaxFieldBackfill(input: { workspaceId: string }): Promise<{ queued: number; remaining: number }>;
+  /** Candidates the backfill has not queued yet (what the card offers). */
+  countTaxFieldBackfillCandidates(workspaceId: string): Promise<number>;
+  /** The `backfill-tax-fields` job's body: the tax fields of one document, the embedded ZUGFeRD
+   * XML first, else `DocumentAnalyzer.extractTaxFields` on the stored OCR text. Writes only the
+   * tax fields and only while all of them are still empty; never touches any other field.
+   * `filled`: something was written (the caller then schedules the ledger's sync). */
+  backfillDocumentTaxFields(input: BackfillTaxFieldsInput): Promise<{ filled: boolean }>;
   /** "Bestätigen und importieren" (F1b, decisions/0020-universal-intake.md's confirmation
    * step): re-reads the stored original file, re-validates `mapping`/`amountSign` (the
    * proposal as-is, or the user's edited version) against every row, and only on success
@@ -1303,11 +1320,76 @@ async function processTabularDocument(
   }
 }
 
+/** Whether any tax field of decisions/0080 phase 2 holds a value. */
+function hasAnyTaxField(fields: DocumentTaxFields): boolean {
+  return (
+    fields.taxBreakdown !== null ||
+    fields.netTotalCents !== null ||
+    fields.taxTotalCents !== null ||
+    fields.passThroughCents !== null ||
+    fields.reverseCharge !== null ||
+    fields.serviceDate !== null ||
+    fields.servicePeriodFrom !== null ||
+    fields.servicePeriodTo !== null ||
+    fields.taxCheck !== null
+  );
+}
+
+/** The ZUGFeRD XML embedded in a stored PDF, or `null` (not a PDF, no XML, unreadable). A
+ * malicious attachment (`UnsafeXmlError`) is logged and read as "no XML": the backfill then asks
+ * the model, exactly what it would do for a PDF without one. */
+async function readEmbeddedZugferd(deps: DocumentUseCaseDeps, doc: { workspaceId: string; id: string; mimeType: string; storageKey: string }): Promise<ZugferdExtraction | null> {
+  if (doc.mimeType !== "application/pdf") return null;
+  try {
+    const bytes = await deps.objectStorage.getObject(doc.storageKey);
+    const xml = await extractEmbeddedXml(bytes);
+    return xml ? extractZugferdInvoiceFields(decodeTextBytes(xml)) : null;
+  } catch (err) {
+    console.error("[documents] tax field backfill could not read the embedded XML", { workspaceId: doc.workspaceId, documentId: doc.id, err: err instanceof Error ? err.name : "unknown" });
+    return null;
+  }
+}
+
 export function createDocumentUseCases(deps: DocumentUseCaseDeps): DocumentUseCases {
   const now = deps.now ?? (() => new Date());
   const generateId = deps.generateId ?? (() => crypto.randomUUID());
 
   return {
+    async requestTaxFieldBackfill({ workspaceId }) {
+      const queued = await deps.uow.transaction(async (repos) => {
+        const ids = await repos.document.markTaxBackfillRequested(workspaceId, { limit: MAX_TAX_BACKFILL_PER_REQUEST, now: now() });
+        for (const documentId of ids) {
+          await repos.jobs.enqueue({ kind: JOB_KINDS.backfillTaxFields, workspaceId, payload: { workspaceId, documentId } satisfies BackfillTaxFieldsInput });
+        }
+        return ids.length;
+      });
+      return { queued, remaining: await deps.repos.document.countTaxBackfillCandidates(workspaceId) };
+    },
+
+    countTaxFieldBackfillCandidates(workspaceId) {
+      return deps.repos.document.countTaxBackfillCandidates(workspaceId);
+    },
+
+    async backfillDocumentTaxFields({ workspaceId, documentId }) {
+      const doc = await deps.repos.document.findById(workspaceId, documentId);
+      // Deleted, reprocessed meanwhile (its own run wrote the fields), or not processed at all.
+      if (!doc || doc.status !== "done" || hasAnyTaxField(doc)) return { filled: false };
+
+      // Deterministic first: an embedded ZUGFeRD XML states the figures as structured data.
+      const zugferd = await readEmbeddedZugferd(deps, doc);
+      const zugferdHasTax = zugferd !== null && hasAnyTaxField({ ...zugferd, taxCheck: null });
+      const fromModel = !zugferdHasTax && doc.ocrText ? await deps.analyzer.extractTaxFields({ text: truncateForAnalysis(doc.ocrText), fileName: doc.originalFileName }) : null;
+
+      const fields = resolveDocumentTaxFields({
+        preferred: zugferdHasTax ? zugferd : null,
+        fallback: fromModel,
+        ocrText: doc.ocrText ?? "",
+        totalAmountCents: doc.totalAmountCents,
+      });
+      if (!hasAnyTaxField(fields)) return { filled: false };
+      return { filled: await deps.repos.document.fillEmptyTaxFields(workspaceId, documentId, fields) };
+    },
+
     async createFromUpload({ workspaceId, uploadedByUserId, originalFileName, bytes, mimeType, extension, pageCount, fileHash }) {
       const workspace = await deps.repos.workspace.findById(workspaceId);
       if (!workspace) throw new UseCaseError(DOCUMENT_ERROR.notFound);

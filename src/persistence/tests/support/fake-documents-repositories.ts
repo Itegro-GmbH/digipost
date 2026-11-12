@@ -9,6 +9,7 @@ import type {
   IntakeFingerprintRow,
   ListDocumentsFilter,
 } from "@/persistence/repositories/contracts";
+import { TAX_BACKFILL_KINDS } from "@/persistence/repositories/contracts/documents-repository";
 
 export function documentRow(overrides: Partial<DocumentRow> & Pick<DocumentRow, "workspaceId" | "storageKey">): DocumentRow {
   return {
@@ -50,6 +51,7 @@ export function documentRow(overrides: Partial<DocumentRow> & Pick<DocumentRow, 
     servicePeriodFrom: null,
     servicePeriodTo: null,
     taxCheck: null,
+    taxBackfillRequestedAt: null,
     paymentStatus: "not_applicable",
     paidAt: null,
     createdAt: new Date(0),
@@ -429,6 +431,28 @@ export function createFakeDocumentRepository(
           confirmedTransactions: [],
         }));
     },
+
+    // The tax field backfill: the same candidate rule as the Drizzle repository (proved against
+    // Postgres in `tax-backfill.db.test.ts`).
+    async countTaxBackfillCandidates(workspaceId) {
+      return rows.filter((r) => isTaxBackfillCandidate(r, workspaceId)).length;
+    },
+
+    async markTaxBackfillRequested(workspaceId, { limit, now }) {
+      const picked = rows
+        .filter((r) => isTaxBackfillCandidate(r, workspaceId))
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id))
+        .slice(0, Math.max(0, limit));
+      for (const row of picked) row.taxBackfillRequestedAt = now;
+      return picked.map((row) => row.id);
+    },
+
+    async fillEmptyTaxFields(workspaceId, id, fields) {
+      const row = rows.find((r) => r.workspaceId === workspaceId && r.id === id);
+      if (!row || !taxFieldsEmpty(row)) return false;
+      Object.assign(row, fields);
+      return true;
+    },
   };
 
   return { repo, state: rows };
@@ -493,4 +517,30 @@ export function createFakeIntakeFingerprintRepository(
   };
 
   return { repo, state: rows };
+}
+
+function taxFieldsEmpty(row: DocumentRow): boolean {
+  return (
+    row.taxBreakdown === null &&
+    row.netTotalCents === null &&
+    row.taxTotalCents === null &&
+    row.passThroughCents === null &&
+    row.reverseCharge === null &&
+    row.serviceDate === null &&
+    row.servicePeriodFrom === null &&
+    row.servicePeriodTo === null &&
+    row.taxCheck === null
+  );
+}
+
+function isTaxBackfillCandidate(row: DocumentRow, workspaceId: string): boolean {
+  return (
+    row.workspaceId === workspaceId &&
+    row.status === "done" &&
+    (TAX_BACKFILL_KINDS as readonly string[]).includes(row.manualKind ?? row.kind) &&
+    row.totalAmountCents !== null &&
+    row.ocrText !== null &&
+    row.taxBackfillRequestedAt === null &&
+    taxFieldsEmpty(row)
+  );
 }

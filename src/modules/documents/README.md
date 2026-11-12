@@ -44,7 +44,11 @@ Maintenance triggers:
   `src/modules/closing`'s periods (decisions/0066-abschluss-check-and-export.md)
 - The tax fields, their parsing, the consistency check or the `listForLedger` row shape change
   (decisions/0080-ledger-double-entry-bookkeeping.md, phase 2)
-Last verified: 2026-11-12, decisions/0080-ledger-double-entry-bookkeeping.md phase 2: the tax
+Last verified: 2026-11-12, "Tax field backfill": `requestTaxFieldBackfill`,
+`backfillDocumentTaxFields`, `DocumentAnalyzer.extractTaxFields`, the three
+`DocumentRepository` methods, `documents.tax_backfill_requested_at` (migration
+`0034_curvy_mongoose.sql`) and `requestTaxFieldBackfillAction`. Previously 2026-11-12,
+decisions/0080-ledger-double-entry-bookkeeping.md phase 2: the tax
 fields (see "Tax fields"), `core/tax-fields.ts`, the ZUGFeRD tax reader, the detail page's tax
 rows and `DocumentRepository.listForLedger`. Previously 2026-11-05, decisions/0079-outgoing-invoices.md: added `precheckQuota`, `createForIssuedInvoice` and `linkIssuedInvoiceCounterparty` (see "Issued invoices"). Previously 2026-11-03, decisions/0078-mcp-server.md: added `listDocumentSummariesProjection`/
 `getDocumentDownloadUrlProjection` (with `DocumentRepository.listSummaries`, which shares
@@ -598,7 +602,7 @@ quota semantics; decisions/0016-processing-pipeline-and-ai.md for the processing
 
 decisions/0080-ledger-double-entry-bookkeeping.md, phase 2: what a booking needs from an
 invoice, stored on `documents` (migration `0031_document_tax_fields`), all nullable and `null` for
-every document processed before (nothing is reprocessed):
+every document processed before, until "Tax field backfill" below reads them:
 
 - `tax_breakdown` (jsonb, `DocumentTaxBreakdownEntry[]`: `{ ratePercent, netCents, taxCents }`
   per printed rate, either amount `null` when only the other is printed), `net_total_cents`,
@@ -641,6 +645,40 @@ every document processed before (nothing is reprocessed):
 - The fake OCR's Telekom letter prints a 19 % line and a service period; `rechnung-reverse-charge.pdf`
   is a reverse-charge invoice. The fake analyzer reads "Netto <rate> %:", "USt <rate> %:",
   "Nettobetrag:", "USt gesamt:", "Durchlaufende Posten:", "Leistungsdatum:", "Leistungszeitraum:".
+
+## Tax field backfill
+
+Documents processed before the tax fields existed have none, so the ledger's proposals for them
+guess (decisions/0080's notes after production use). "Steuerdaten alter Belege nachträglich
+erkennen" on `/dashboard/buchhaltung/einstellungen` ("Allgemein", `finance.manage`; the card is
+the ledger's `TaxBackfillCard`, the action and everything behind it this owner's) reads them once:
+
+- `requestTaxFieldBackfillAction` -> `DocumentUseCases.requestTaxFieldBackfill`: in one
+  transaction, `DocumentRepository.markTaxBackfillRequested` marks up to
+  `MAX_TAX_BACKFILL_PER_REQUEST` (100) candidates, oldest first, with
+  `documents.tax_backfill_requested_at` (migration `0034_curvy_mongoose.sql`; one
+  `update ... where id in (select ... for update skip locked)`), and one `backfill-tax-fields`
+  job is enqueued per marked document. A candidate: effective kind `incoming_invoice`,
+  `outgoing_invoice`, `receipt` or `authority_letter` (`TAX_BACKFILL_KINDS`), `done`, with a total
+  and OCR text, every tax field `null`, never marked. A second click therefore queues only what
+  the first did not; a document is sent to the AI at most once, even when nothing is found. The
+  card shows the candidates (`countTaxFieldBackfillCandidatesProjection`) and, after a click,
+  "n Belege werden nachträglich ausgelesen" plus what is left for another click. The runner
+  starts in `after()`; what its budget leaves runs with the next job sweep.
+- The job (`backfillDocumentTaxFields`): skipped when the document is gone, not `done`, or has
+  any tax field by now. The embedded ZUGFeRD XML first (no model call when it states any tax
+  figure); else `DocumentAnalyzer.extractTaxFields` on the stored OCR text (truncated like the
+  analysis; the tax-only prompt, `src/platform/mistral`); then `resolveDocumentTaxFields` (the
+  reverse-charge note in the text, the consistency check) exactly as in processing.
+  `DocumentRepository.fillEmptyTaxFields` writes the tax fields and nothing else (no title,
+  total, contact, payment field) and only while all of them are still `null`. When something
+  was written, the job handler schedules the ledger's `ledger-sync`, which updates the
+  document's proposal while nobody edited, booked or dismissed it (a changed question also asks
+  the ledger's AI advisor again). Same "Mistral and personal data" status as the original
+  analysis.
+- Tested: `src/persistence/tests/documents-use-cases.test.ts` ("tax field backfill"),
+  `src/persistence/tests/tax-backfill.db.test.ts` (Postgres: candidates, concurrent clicks, the
+  conditional write, and the way to the ledger proposal), `tests/actions.test.ts`.
 
 ## Issued invoices
 

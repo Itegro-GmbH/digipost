@@ -20,7 +20,7 @@ export type {
   OwnCompanyContext,
 } from "./core/ports";
 export { documentDisplayName, documentNameSource, type DocumentNameParts } from "./core/display-name";
-export { MAX_GUIDED_PARTIES, validateAnalysisResult, validateGuidedAnalysisResult } from "./core/analysis-validation";
+export { MAX_GUIDED_PARTIES, validateAnalysisResult, validateGuidedAnalysisResult, validateTaxFieldsResult } from "./core/analysis-validation";
 export { inferCurrency, parseGermanAmountToCents } from "./core/amount-parsing";
 // decisions/0080-ledger-double-entry-bookkeeping.md, phase 2: the tax fields' parsing, the
 // reverse-charge note detection, the consistency check and the ZUGFeRD/model merge, all pure.
@@ -28,6 +28,7 @@ export {
   checkTaxConsistency,
   detectReverseChargeNote,
   EMPTY_TAX_FIELDS,
+  MAX_TAX_BACKFILL_PER_REQUEST,
   parseTaxRatePercent,
   resolveDocumentTaxFields,
   TAX_CHECK_ISSUES,
