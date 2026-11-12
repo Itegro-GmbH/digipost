@@ -18,7 +18,16 @@ Maintenance triggers:
 - The payment arbiter's prompt or JSON contract changes (decisions/0023-payment-matching.md, F3a)
 - The payment arbiter's prompt starts showing a value outside its two fingerprint samples'
   shape (`paymentArbiterPromptFingerprint`, decisions/0077-arbiter-answer-cache.md)
-Last verified: 2026-10-22, decisions/0077-arbiter-answer-cache.md: every `PaymentArbiter` now
+Last verified: 2026-11-12, decisions/0080-ledger-double-entry-bookkeeping.md phase 2: the
+`"invoice"` block (`INVOICE_JSON_FIELDS` in `server/prompts.ts`, now shared by the ungated
+`SYSTEM_PROMPT` and both guided prompts) also asks for `netTotalAmount`, `taxTotalAmount`,
+`taxBreakdown[{ rate, netAmount, taxAmount }]`, `passThroughAmount`, `reverseCharge`,
+`serviceDate` and `servicePeriodFrom`/`servicePeriodTo`, every amount as printed text, and each
+prompt's closing sentence forbids computing a missing net or tax amount (`TAX_RULE`). Parsing
+and checking stay in `@/modules/documents` (`core/tax-fields.ts`). The supplier's VAT id and
+country are not asked a second time: they are the counterparty's own `vatId`/`country`. The same
+"Mistral and personal data" rule (AGENTS.md) applies to the new fields; only the fake provider
+runs until the DPA exists. Previously 2026-10-22, decisions/0077-arbiter-answer-cache.md: every `PaymentArbiter` now
 names a `version`, part of `@/modules/payments`'s answer-cache key.
 `createMistralPaymentArbiter`'s is `mistral:<model>:<prompt fingerprint>`, where
 `paymentArbiterPromptFingerprint()` (`server/payment-arbiter-prompts.ts`) hashes the system

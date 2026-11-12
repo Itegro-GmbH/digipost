@@ -15,7 +15,9 @@ Maintenance triggers:
 - The lock rule (what a filing freezes) changes
 - The existing clearing accounts (decisions/0026, decisions/0068) are migrated onto the ledger
 - The export format to the tax advisor is decided
-Last verified: 2026-11-12, stage 1 implemented (core, persistence, use cases, actions): status,
+Last verified: 2026-11-12, phase 2 implemented (tax fields on `documents`,
+`DocumentRepository.listForLedger`), against `src/persistence/schema/documents.ts` and
+`src/modules/documents/core/tax-fields.ts`. Previously 2026-11-12, stage 1 implemented (core, persistence, use cases, actions): status,
 "Model as implemented" and "Cascade verification" added, against `src/persistence/schema/ledger.ts`,
 `src/persistence/sql/ledger_balanced_entries/`, `src/persistence/sql/ledger_filing_lock/` and
 `src/persistence/tests/workspaces-repository.db.test.ts`. Previously 2026-11-12, initial proposal, against `src/persistence/schema/accounts.ts`,
@@ -30,8 +32,9 @@ Accepted, being implemented (stage 1: core). Stage 1 is the ledger core in `src/
 and `src/persistence/use-cases/ledger-use-cases.ts`: the tables below, the SKR 04 seed, tax codes
 and their expansion, entries with revisions, booking, open-item matches, booking rules, filings
 and the lock, handovers, the tax advisor's balance lists, every report and control, and the
-Server Actions. Not yet: the proposal engine (phase 3, which writes through `upsertProposal`), the
-new extraction fields (phase 2) and every page. Builds on decisions/0024-accounts-and-transactions.md,
+Server Actions. Phase 2 (the new extraction fields) is implemented: see "Documents need more
+extracted fields" below. Not yet: the proposal engine (phase 3, which writes through
+`upsertProposal`) and every page. Builds on decisions/0024-accounts-and-transactions.md,
 decisions/0026-platform-settlements.md, decisions/0068-supplier-clearing-accounts.md,
 decisions/0066-abschluss-check-and-export.md and decisions/0079-outgoing-invoices.md.
 
@@ -142,6 +145,16 @@ Every generated entry is `proposed` until a human books it:
 
 Documents need more extracted fields for this: net and tax per rate, service date, the
 supplier's VAT id and country, a reverse-charge note, and pass-through amounts.
+
+Phase 2 as implemented (`src/modules/documents/README.md`, "Tax fields"): `documents` gained
+`tax_breakdown` (jsonb, one `{ ratePercent, netCents, taxCents }` per printed rate),
+`net_total_cents`, `tax_total_cents`, `pass_through_cents`, `reverse_charge`, `service_date`,
+`service_period_from`/`service_period_to` and `tax_check` (`consistent`/`inconsistent`), all
+nullable, existing documents stay `null`. The model returns printed text, code parses it; an
+embedded ZUGFeRD XML wins field by field (category `AE` is reverse charge); a mismatch between
+the printed figures is flagged, never corrected. The supplier's VAT id and country stay on the
+linked contact (ZUGFeRD fills in what the model missed) instead of being copied onto the
+document. The ledger reads everything through `DocumentRepository.listForLedger`.
 
 ### Editable until filed
 
