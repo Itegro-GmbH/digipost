@@ -112,6 +112,20 @@ describe("the filing confirm card", () => {
     expect(screen.getByRole("alert").textContent).toBe(de.Ledger.errors.filing_not_draft);
   });
 
+  it("a failed submission keeps the draft it created: the retry submits it instead of creating a second one", async () => {
+    submitFilingMock.mockResolvedValueOnce({ status: "error", errorCode: "unknown" });
+    renderPeriods([period({})]);
+    fireEvent.click(within(row("2026-Q3")).getByRole("button", { name: "Als eingereicht markieren" }));
+    const card = screen.getByRole("alertdialog");
+    fireEvent.click(within(card).getByRole("checkbox"));
+    await act(async () => fireEvent.click(within(card).getByRole("button", { name: "Als eingereicht markieren" })));
+    expect(screen.getByRole("alert")).toBeTruthy();
+    await act(async () => fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Als eingereicht markieren" })));
+    expect(createFilingMock).toHaveBeenCalledTimes(1);
+    expect(submitFilingMock).toHaveBeenCalledTimes(2);
+    expect(submitFilingMock).toHaveBeenLastCalledWith(expect.objectContaining({ filingId: "draft-1" }));
+  });
+
   it("asks for the annual statement without a Zahllast", () => {
     renderPeriods([]);
     fireEvent.click(within(row("2026")).getByRole("button", { name: "Als eingereicht markieren" }));

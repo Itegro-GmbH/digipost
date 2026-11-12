@@ -299,3 +299,74 @@ describe("EntryEditor, existing entries", () => {
     expect(screen.getByRole("link", { name: "Korrektur buchen" }).getAttribute("href")).toBe(`/dashboard/buchhaltung/buchung/neu?korrektur=${booked.id}`);
   });
 });
+
+describe("EntryEditor, partial failures and locked periods", () => {
+  const ionos = expandTaxLines([
+    { accountNumber: "6810", amountCents: 150, taxCode: "vst19" },
+    { accountNumber: "1800", amountCents: -150 },
+  ]);
+  const proposal: EditorEntry = { ...NEW_ENTRY, id: "33333333-3333-4333-8333-333333333333", status: "proposed", origin: "rule", revision: 2, text: "IONOS", lines: ionos };
+
+  it("Buchen: when booking fails after the save, a retry books without saving again", async () => {
+    bookMock.mockResolvedValueOnce({ status: "error", errorCode: "unbalanced" });
+    renderEditor({ entry: proposal });
+    pickAccount(screen.getByRole("combobox", { name: "Wofür?" }), "6600");
+    await act(async () => fireEvent.click(bookButton()));
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    expect(updateMock).toHaveBeenCalledWith(expect.objectContaining({ expectedRevision: 2 }));
+    expect(screen.getByRole("alert")).toBeTruthy();
+    await act(async () => fireEvent.click(bookButton()));
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    expect(bookMock).toHaveBeenCalledTimes(2);
+    expect(pushMock).toHaveBeenCalledWith("/dashboard/buchhaltung/zu-pruefen");
+  });
+
+  it("Buchen: a further change after a failed booking is saved against the new revision", async () => {
+    bookMock.mockResolvedValueOnce({ status: "error", errorCode: "unbalanced" });
+    renderEditor({ entry: proposal });
+    pickAccount(screen.getByRole("combobox", { name: "Wofür?" }), "6600");
+    await act(async () => fireEvent.click(bookButton()));
+    type("Buchungstext", "IONOS Juli");
+    await act(async () => fireEvent.click(bookButton()));
+    expect(updateMock).toHaveBeenLastCalledWith(expect.objectContaining({ expectedRevision: 3 }));
+  });
+
+  it("asks which correcting filing to book into only when there are several", async () => {
+    const drafts = [
+      { id: "44444444-4444-4444-8444-444444444441", kind: "vat_return" as const, periodFrom: "2026-07-01", periodTo: "2026-09-30" },
+      { id: "44444444-4444-4444-8444-444444444442", kind: "vat_return" as const, periodFrom: "2026-07-01", periodTo: "2026-09-30" },
+    ];
+    createMock.mockResolvedValueOnce({ status: "error", errorCode: "filing_choice_required" });
+    renderEditor({ entry: { ...NEW_ENTRY, text: "Nachbuchung", lines: ionos }, correctionFilings: drafts });
+    expect(screen.queryByLabelText("Berichtigte Meldung")).toBeNull();
+    await act(async () => fireEvent.click(bookButton()));
+    expect(screen.getByRole("alert").textContent).toContain(de.Ledger.errors.filing_choice_required);
+    const select = screen.getByLabelText("Berichtigte Meldung") as HTMLSelectElement;
+    expect([...select.options].map((option) => option.value)).toEqual(["", ...drafts.map((draft) => draft.id)]);
+    fireEvent.change(select, { target: { value: drafts[1]!.id } });
+    await act(async () => fireEvent.click(bookButton()));
+    expect(createMock).toHaveBeenLastCalledWith(expect.objectContaining({ book: true, entry: expect.objectContaining({ filingId: drafts[1]!.id }) }));
+  });
+
+  it("a locked period links to the periods page", async () => {
+    createMock.mockResolvedValueOnce({ status: "error", errorCode: "locked" });
+    renderEditor({ entry: { ...NEW_ENTRY, text: "Nachbuchung", lines: ionos } });
+    await act(async () => fireEvent.click(bookButton()));
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain(de.Ledger.errors.locked);
+    expect(within(alert).getByRole("link", { name: "Zeiträume und Meldungen" }).getAttribute("href")).toBe("/dashboard/buchhaltung/auswertungen/zeitraeume");
+  });
+
+  it("says when a printed tax is not used because it would leave no net amount", () => {
+    renderEditor({
+      seed: "document",
+      entry: { ...NEW_ENTRY, documentId: "doc-1" },
+      sourceDocument: {
+        id: "doc-1", kind: "incoming_invoice", direction: "incoming", title: "Quittung", sender: "Kiosk", documentDate: "2026-09-03", effectiveDate: "2026-09-03", invoiceNumber: null,
+        totalAmountCents: 119, currency: "EUR", netTotalCents: null, taxTotalCents: 119, taxBreakdown: [{ ratePercent: 19, netCents: null, taxCents: 119 }], passThroughCents: null,
+        reverseCharge: null, serviceDate: null, servicePeriodFrom: null, servicePeriodTo: null, contactId: null, contactName: "Kiosk", originalFileName: "q.pdf",
+      },
+    });
+    expect(screen.getByText(de.Ledger.editor.printedTaxIgnored)).toBeTruthy();
+  });
+});

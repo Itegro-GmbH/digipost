@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -92,6 +92,9 @@ export function FilingConfirmCard({
   const [amountText, setAmountText] = useState("");
   const [direction, setDirection] = useState<"payable" | "refund">(period.previewPayableCents !== null && period.previewPayableCents < 0 ? "refund" : "payable");
   const [confirmed, setConfirmed] = useState(false);
+  // The draft this card created: when submitting it fails, a retry submits the same draft
+  // instead of creating a second one (which the database would refuse as overlapping).
+  const createdDraftId = useRef<string | null>(null);
 
   const isVat = period.kind === "vat_return";
   const parsed = amountText.trim() === "" ? null : parseAmountInput(amountText);
@@ -104,11 +107,12 @@ export function FilingConfirmCard({
 
   function submit() {
     run(async () => {
-      let filingId = period.draft?.id ?? null;
+      let filingId = period.draft?.id ?? createdDraftId.current;
       if (!filingId) {
         const created = await createFilingAction({ kind: period.kind, periodFrom: period.from, periodTo: period.to, status: "draft" });
         if (created.status === "error") return created;
         filingId = created.data.id;
+        createdDraftId.current = filingId;
       }
       return submitFilingAction({ filingId, submittedOn, amountCents });
     }, onCancel);

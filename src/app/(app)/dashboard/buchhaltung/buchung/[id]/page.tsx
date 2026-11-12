@@ -3,8 +3,9 @@ import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { ArrowLeft } from "lucide-react";
 
+import { draftCorrectionFilings } from "@/modules/ledger";
 import { EntryEditor, OriginPill, RevisionHistory, SourcePanel, StatusPill } from "@/modules/ledger/client";
-import { getJournalEntryProjection, getLedgerSourcesProjection, isLedgerEnabledProjection, listLedgerAccountsProjection } from "@/modules/ledger/server";
+import { getJournalEntryProjection, getLedgerSourcesProjection, isLedgerEnabledProjection, listLedgerAccountsProjection, listLedgerFilingsProjection } from "@/modules/ledger/server";
 import { listTeamProjection } from "@/modules/workspaces/server";
 import { PERMISSIONS } from "@/platform/access";
 import { requireWorkspaceMember } from "@/platform/access/server";
@@ -29,11 +30,12 @@ export default async function LedgerEntryPage({ params }: PageProps<"/dashboard/
   if (!entry) notFound();
   const canManage = access.permissions.includes(PERMISSIONS.financeManage);
 
-  const [t, accounts, sources, team] = await Promise.all([
+  const [t, accounts, sources, team, filings] = await Promise.all([
     getTranslations("Ledger"),
     listLedgerAccountsProjection(workspaceId),
     getLedgerSourcesProjection(workspaceId, entry.documentId ? [entry.documentId] : [], entry.transactionId ? [entry.transactionId] : []),
     listTeamProjection(workspaceId),
+    listLedgerFilingsProjection(workspaceId),
   ]);
   const document = sources.documents[0] ?? null;
   const transaction = sources.transactions[0] ?? null;
@@ -90,6 +92,7 @@ export default async function LedgerEntryPage({ params }: PageProps<"/dashboard/
           canManage={canManage}
           lockedBy={entry.lockedBy}
           ruleSubject={ruleSubject}
+          correctionFilings={draftCorrectionFilings(filings)}
         />
       </div>
 

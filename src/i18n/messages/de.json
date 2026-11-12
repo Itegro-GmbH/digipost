@@ -2355,7 +2355,11 @@
       "lockedChip": "Gesperrt durch {filing}",
       "lockedText": "Für diesen Zeitraum ist die Meldung eingereicht. Ändern Sie die Buchung über eine Korrekturbuchung in einem offenen Zeitraum oder über eine berichtigte Meldung.",
       "correct": "Korrektur buchen",
-      "periods": "Zeiträume und Meldungen"
+      "periods": "Zeiträume und Meldungen",
+      "correctionFiling": "Berichtigte Meldung",
+      "correctionFilingOption": "Berichtigung zu {filing}",
+      "correctionFilingHint": "Die Buchung liegt in einem gemeldeten Zeitraum. Sie gehört zu der berichtigten Meldung, die Sie hier wählen.",
+      "printedTaxIgnored": "Die auf dem Beleg ausgewiesene Steuer ist so hoch wie der Bruttobetrag und wird nicht übernommen. Digipost rechnet die Steuer aus dem Betrag. Bitte prüfen Sie den Beleg."
     },
     "source": {
       "heading": "Herkunft der Buchung",

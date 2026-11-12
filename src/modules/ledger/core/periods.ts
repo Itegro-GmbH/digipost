@@ -2,7 +2,7 @@
 // locks a date (decisions/0080 "Locked when filed"). Pure; the use case and the database stay the
 // authority on the lock itself, this only labels it.
 import { vatPeriodsOfYear, type LabeledPeriod } from "./controls";
-import type { FilingView, VatPeriod } from "./types";
+import type { FilingRef, FilingView, VatPeriod } from "./types";
 
 export type PeriodShape =
   | { kind: "month"; year: number; month: number }
@@ -42,6 +42,14 @@ export function lockingFilingFor(filings: readonly FilingView[], date: string): 
 
 /** The first day on or after `date` that no submitted filing locks: where "Korrektur buchen"
  * books its correction. */
+/** The draft correcting filings an entry in a locked period can be booked into (the editor's
+ * choice when there is more than one). */
+export function draftCorrectionFilings(filings: readonly FilingView[]): FilingRef[] {
+  return filings
+    .filter((filing) => filing.status === "draft" && filing.correctsFilingId !== null)
+    .map((filing) => ({ id: filing.id, kind: filing.kind, periodFrom: filing.periodFrom, periodTo: filing.periodTo }));
+}
+
 export function firstOpenDate(filings: readonly FilingView[], date: string): string {
   let current = date;
   for (let guard = 0; guard < 100; guard += 1) {

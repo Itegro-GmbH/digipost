@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { ArrowLeft } from "lucide-react";
 
-import { firstOpenDate } from "@/modules/ledger";
+import { draftCorrectionFilings, firstOpenDate } from "@/modules/ledger";
 import { EntryEditor, SourcePanel, type EditorEntry, type EditorSeed } from "@/modules/ledger/client";
 import {
   getJournalEntryProjection,
@@ -45,7 +45,7 @@ export default async function NewLedgerEntryPage({ searchParams }: PageProps<"/d
   const transactionId = uuidParam(params.umsatz);
   const correctionOfId = uuidParam(params.korrektur);
 
-  const [t, accounts] = await Promise.all([getTranslations("Ledger"), listLedgerAccountsProjection(workspaceId)]);
+  const [t, accounts, allFilings] = await Promise.all([getTranslations("Ledger"), listLedgerAccountsProjection(workspaceId), listLedgerFilingsProjection(workspaceId)]);
   const todayIso = new Date().toISOString().slice(0, 10);
 
   let seed: EditorSeed = "entry";
@@ -68,13 +68,13 @@ export default async function NewLedgerEntryPage({ searchParams }: PageProps<"/d
   let heading = t("editor.headingNew");
 
   if (correctionOfId) {
-    const [original, filings] = await Promise.all([getJournalEntryProjection(workspaceId, correctionOfId), listLedgerFilingsProjection(workspaceId)]);
+    const original = await getJournalEntryProjection(workspaceId, correctionOfId);
     if (!original) notFound();
     seed = "reverse";
     heading = t("editor.headingCorrection");
     entry = {
       ...entry,
-      bookingDate: firstOpenDate(filings, original.bookingDate),
+      bookingDate: firstOpenDate(allFilings, original.bookingDate),
       documentDate: original.documentDate,
       text: t("editor.correctionText", { text: original.text, date: formatDate(original.bookingDate) }).slice(0, 500),
       documentId: original.documentId,
@@ -122,6 +122,7 @@ export default async function NewLedgerEntryPage({ searchParams }: PageProps<"/d
           canManage
           lockedBy={null}
           ruleSubject={ruleSubject}
+          correctionFilings={draftCorrectionFilings(allFilings)}
         />
       </div>
     </div>

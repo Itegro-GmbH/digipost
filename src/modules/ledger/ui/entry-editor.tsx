@@ -20,6 +20,7 @@ import {
 } from "../actions";
 import type { LedgerActionErrorCode } from "../core/error-codes";
 import { PAYABLES_ACCOUNT, RECEIVABLES_ACCOUNT } from "../core/proposals";
+import { printedTaxIgnored } from "../core/tax-codes";
 import { TAX_CODES, type FilingRef, type JournalEntryOrigin, type JournalEntryStatus, type LedgerAccountView, type LedgerSourceDocument, type LedgerSourceTransaction, type TaxCode } from "../core/types";
 import { AccountCombobox } from "./account-combobox";
 import { EntryLinesTable } from "./entry-lines-table";
@@ -73,6 +74,12 @@ export type EditorSeed = "entry" | "document" | "transaction" | "reverse";
 
 const EXPENSE_TAX_CODES: readonly TaxCode[] = ["vst19", "vst7", "rc13b", "pass_through", "not_taxable", "tax_free"];
 const INCOME_TAX_CODES: readonly TaxCode[] = ["ust19", "ust7", "eu_not_taxable", "tax_free", "not_taxable"];
+
+/** Whether a filing's period holds the date (an annual statement its whole year). */
+function filingCovers(filing: FilingRef, date: string): boolean {
+  if (filing.kind === "annual_statement") return date.slice(0, 4) >= filing.periodFrom.slice(0, 4) && date.slice(0, 4) <= filing.periodTo.slice(0, 4);
+  return date >= filing.periodFrom && date <= filing.periodTo;
+}
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -138,6 +145,7 @@ export function EntryEditor({
   canManage,
   lockedBy,
   ruleSubject,
+  correctionFilings = [],
 }: {
   entry: EditorEntry;
   seed: EditorSeed;
@@ -149,6 +157,9 @@ export function EntryEditor({
   lockedBy: FilingRef | null;
   /** The contact or counterparty "Für <Kontakt> künftig so vorschlagen" names; `null` hides it. */
   ruleSubject: string | null;
+  /** Draft correcting filings: offered only when booking into a locked period needs a choice
+   * (`filing_choice_required`); with one, the use case takes it by itself. */
+  correctionFilings?: readonly FilingRef[];
 }) {
   const t = useTranslations("Ledger");
   const router = useRouter();
@@ -169,6 +180,10 @@ export function EntryEditor({
   const [switchBlocked, setSwitchBlocked] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [filingChoice, setFilingChoice] = useState("");
+  // The revision this editor last saved: a save that went through before a failed booking is
+  // not repeated, and the next save is checked against it, not the one the page loaded.
+  const [revision, setRevision] = useState(entry.revision);
 
   const isNew = entry.id === null;
   const booked = entry.status === "booked";
@@ -185,10 +200,11 @@ export function EntryEditor({
     documentId: entry.documentId,
     transactionId: entry.transactionId,
     correctionOfEntryId: entry.correctionOfEntryId,
-    filingId: entry.filingId,
+    filingId: filingChoice || entry.filingId,
   });
-  const [initialPayload] = useState(() => JSON.stringify(payload()));
-  const dirty = JSON.stringify(payload()) !== initialPayload;
+  const [savedPayload, setSavedPayload] = useState(() => JSON.stringify(payload()));
+  const dirty = JSON.stringify(payload()) !== savedPayload;
+  const choosableFilings = correctionFilings.filter((filing) => filingCovers(filing, bookingDate));
 
   const expanded = expandedLines(lines);
   const displayLines = expanded.map((line) => ({ ...line, accountName: accountsByNumber.get(line.accountNumber)?.name ?? "" }));
@@ -247,8 +263,11 @@ export function EntryEditor({
         router.push(`/dashboard/buchhaltung/buchung/${result.data.entryId}`);
         return;
       }
-      const result = await updateJournalEntryAction({ entryId: entry.id, entry: payload(), reason: reason.trim() || null, expectedRevision: entry.revision });
+      const sent = payload();
+      const result = await updateJournalEntryAction({ entryId: entry.id, entry: sent, reason: reason.trim() || null, expectedRevision: revision });
       if (result.status === "error") return setErrorCode(result.errorCode);
+      setRevision(result.data.revision);
+      setSavedPayload(JSON.stringify(sent));
       if (booked && !(await maybeLearnRule(entry.id!))) return;
       setNotice(t("editor.saved"));
       router.refresh();
@@ -264,8 +283,12 @@ export function EntryEditor({
         entryId = result.data.entryId;
       } else {
         if (dirty) {
-          const updated = await updateJournalEntryAction({ entryId, entry: payload(), reason: null, expectedRevision: entry.revision });
+          const sent = payload();
+          const updated = await updateJournalEntryAction({ entryId, entry: sent, reason: null, expectedRevision: revision });
           if (updated.status === "error") return setErrorCode(updated.errorCode);
+          // Saved: a retry after a failed booking only books.
+          setRevision(updated.data.revision);
+          setSavedPayload(JSON.stringify(sent));
         }
         const result = await bookJournalEntryAction({ entryId });
         if (result.status === "error") return setErrorCode(result.errorCode);
@@ -773,6 +796,7 @@ export function EntryEditor({
           {t("editor.preview")}
         </h2>
         <EntryLinesTable lines={displayLines} caption={t("editor.preview")} />
+        {!readOnly && printedTaxIgnored(toLineInputs(lines)) ? <p className="text-xs text-muted-foreground">{t("editor.printedTaxIgnored")}</p> : null}
         {!readOnly && bookIssues.length > 0 ? (
           <ul aria-live="polite" className="flex flex-col gap-0.5 text-xs text-muted-foreground">
             {bookIssues.map((issue) => (
@@ -820,6 +844,25 @@ export function EntryEditor({
               {t("editor.reload")}
             </Button>
           ) : null}
+          {errorCode === "locked" ? (
+            <Link href="/dashboard/buchhaltung/auswertungen/zeitraeume" className={buttonVariants({ variant: "outline", size: "sm" })}>
+              {t("editor.periods")}
+            </Link>
+          ) : null}
+        </div>
+      ) : null}
+      {errorCode === "filing_choice_required" || filingChoice !== "" ? (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={fieldId("filing")}>{t("editor.correctionFiling")}</Label>
+          <select id={fieldId("filing")} className={SELECT_CLASSES} value={filingChoice} onChange={(event) => setFilingChoice(event.target.value)}>
+            <option value="">{t("editor.choose")}</option>
+            {choosableFilings.map((filing) => (
+              <option key={filing.id} value={filing.id}>
+                {t("editor.correctionFilingOption", { filing: filingLabel(filing) })}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-muted-foreground">{t("editor.correctionFilingHint")}</p>
         </div>
       ) : null}
       {notice ? (

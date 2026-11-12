@@ -123,7 +123,7 @@ export {
   type BalanceViewRow,
 } from "./core/balance-view";
 export { ledgerDocumentStatusOf } from "./core/document-status";
-export { describePeriod, firstOpenDate, lockingFilingFor, startedVatPeriods, type PeriodShape } from "./core/periods";
+export { describePeriod, draftCorrectionFilings, firstOpenDate, lockingFilingFor, startedVatPeriods, type PeriodShape } from "./core/periods";
 export type {
   AdviceAccount,
   AdviceTaxBreakdownEntry,
