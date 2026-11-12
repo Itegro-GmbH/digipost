@@ -33,9 +33,9 @@ describe("expandTaxLines", () => {
       { accountNumber: "1800", amountCents: -150 },
     ]);
     expect(lines).toEqual([
-      { position: 1, accountNumber: "6810", amountCents: 126, taxCode: "vst19", taxRole: "base", generatedFromLinePosition: null, text: null },
-      { position: 2, accountNumber: "1406", amountCents: 24, taxCode: "vst19", taxRole: "tax", generatedFromLinePosition: 1, text: null },
-      { position: 3, accountNumber: "1800", amountCents: -150, taxCode: null, taxRole: null, generatedFromLinePosition: null, text: null },
+      { position: 1, accountNumber: "6810", amountCents: 126, taxCode: "vst19", taxRole: "base", generatedFromLinePosition: null, documentId: null, text: null },
+      { position: 2, accountNumber: "1406", amountCents: 24, taxCode: "vst19", taxRole: "tax", generatedFromLinePosition: 1, documentId: null, text: null },
+      { position: 3, accountNumber: "1800", amountCents: -150, taxCode: null, taxRole: null, generatedFromLinePosition: null, documentId: null, text: null },
     ]);
     expect(isBalanced(lines)).toBe(true);
   });

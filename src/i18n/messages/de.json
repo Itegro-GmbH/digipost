@@ -1853,7 +1853,8 @@
       "unauthenticated": "Bitte melden Sie sich erneut an.",
       "no_workspace": "Sie gehören zu keinem Arbeitsbereich.",
       "forbidden": "Dafür fehlt Ihnen die Berechtigung.",
-      "unknown": "Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut."
+      "unknown": "Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut.",
+      "rule_source_missing": "Aus dieser Buchung lässt sich keine Regel ableiten: Es fehlt ein Kontakt oder eine Gegenpartei, oder die Buchung verteilt sich auf mehrere Konten."
     },
     "taxCodes": {
       "vst19": {
@@ -2052,9 +2053,28 @@
       "expensePaidByShareholder": "{amount, number, ::currency/EUR} für {account}, privat bezahlt von {person}. Die Gesellschaft erstattet den Betrag.",
       "reverseCharge": "{amount, number, ::currency/EUR} für {account} von einem ausländischen Anbieter, gegen {counter}. Die Umsatzsteuer schulden Sie selbst und ziehen sie als Vorsteuer wieder ab (§ 13b UStG).",
       "revenue": "Einnahme von {amount, number, ::currency/EUR} auf {account}, gegen {counter}.",
+      "platformReport": "Abrechnung über {counter}: Einnahmen von {amount, number, ::currency/EUR}, abzüglich Gebühren von {fees, number, ::currency/EUR}.",
+      "paymentOut": "Zahlung von {amount, number, ::currency/EUR} von {bank}, gebucht auf {counter}.",
+      "paymentIn": "Zahlungseingang von {amount, number, ::currency/EUR} auf {bank}, gebucht auf {counter}.",
       "transfer": "{amount, number, ::currency/EUR} von {from} nach {to} umgebucht.",
       "split": "{amount, number, ::currency/EUR} aufgeteilt auf {count} Konten.",
       "manual": "Buchung über {amount, number, ::currency/EUR} mit {count, plural, one {# Zeile} other {# Zeilen}}."
+    },
+    "templates": {
+      "incoming_invoice": "Eingangsrechnung",
+      "outgoing_document": "Ausgangsrechnung (Beleg)",
+      "outgoing_invoice": "Ausgangsrechnung aus Digipost",
+      "settlement_report": "Plattform-Abrechnung",
+      "bank_document_payment": "Zahlung zu einem Beleg",
+      "bank_clearing_pair": "Auszahlung oder Abbuchung einer Plattform",
+      "bank_contact_account": "Zahlung über ein Verrechnungskonto",
+      "bank_person_account": "Erstattung an einen Gesellschafter",
+      "bank_own_transfer": "Umbuchung zwischen eigenen Konten",
+      "bank_no_document_rule": "Regel ohne Beleg"
+    },
+    "matchSuggestionReasons": {
+      "same_document": "Rechnung und Zahlung zum selben Beleg",
+      "subset_sum": "Diese Posten ergeben zusammen null"
     }
   }
 }

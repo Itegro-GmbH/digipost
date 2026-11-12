@@ -27,6 +27,23 @@ function isPaymentAccount(line: SummaryLine): boolean {
   return line.group === "bank" || line.ownerType === "bank_account";
 }
 
+/** Lines of the same account count once (an invoice's 19 % part and its pass-through part on
+ * the same expense account is still one expense). */
+function distinctAccounts(lines: readonly SummaryLine[]): SummaryLine[] {
+  const seen = new Map<string, SummaryLine>();
+  for (const line of lines) {
+    const existing = seen.get(line.accountNumber);
+    seen.set(line.accountNumber, existing ? { ...existing, amountCents: existing.amountCents + line.amountCents } : line);
+  }
+  return [...seen.values()];
+}
+
+/** Money moving between a bank account and one that is not income or expense: a transfer when
+ * both sides hold money (another bank account, money in transit), else a payment. */
+function isMoneyAccount(line: SummaryLine): boolean {
+  return isPaymentAccount(line) || (line.ownerType === null && line.group === "other" && line.kind === "asset");
+}
+
 /** Picks the template that describes the entry best; `manual` when none fits. */
 export function summarizeEntry(lines: readonly SummaryLine[]): MessageRef {
   const total = lines.reduce((sum, line) => (line.amountCents > 0 ? sum + line.amountCents : sum), 0);
@@ -34,10 +51,18 @@ export function summarizeEntry(lines: readonly SummaryLine[]): MessageRef {
   const manual = ref("manual", { amount: euros(total), count: lines.length });
   if (base.length < 2) return manual;
 
-  const debits = base.filter((line) => line.amountCents > 0);
-  const credits = base.filter((line) => line.amountCents < 0);
+  const debits = distinctAccounts(base.filter((line) => line.amountCents > 0));
+  const credits = distinctAccounts(base.filter((line) => line.amountCents < 0));
   const expenses = debits.filter((line) => line.kind === "expense");
   const revenues = credits.filter((line) => line.kind === "revenue");
+
+  // A platform's report: sales (and its fees) against what the platform owes.
+  const platform = debits.find((line) => line.ownerType === "platform");
+  if (platform && revenues.length >= 1) {
+    const sales = revenues.reduce((sum, line) => sum - line.amountCents, 0);
+    const fees = expenses.reduce((sum, line) => sum + line.amountCents, 0);
+    return ref("platformReport", { amount: sales / 100, fees: fees / 100, counter: platform.accountName });
+  }
 
   if (expenses.length > 1 || revenues.length > 1) {
     const parts = expenses.length > 1 ? expenses : revenues;
@@ -62,8 +87,22 @@ export function summarizeEntry(lines: readonly SummaryLine[]): MessageRef {
     return ref("revenue", { amount: euros(debits[0]!.amountCents), account: revenues[0]!.accountName, counter: debits[0]!.accountName });
   }
 
-  if (base.length === 2 && debits.length === 1 && credits.length === 1 && expenses.length === 0 && revenues.length === 0) {
-    return ref("transfer", { amount: euros(debits[0]!.amountCents), from: credits[0]!.accountName, to: debits[0]!.accountName });
+  if (expenses.length === 0 && revenues.length === 0) {
+    const banks = base.filter(isPaymentAccount);
+    if (banks.length === 1) {
+      const bank = banks[0]!;
+      const others = distinctAccounts(base.filter((line) => line !== bank));
+      const opposite = others.every((line) => Math.sign(line.amountCents) === -Math.sign(bank.amountCents));
+      if (others.length >= 1 && opposite && !others.every(isMoneyAccount)) {
+        const counter = others.length === 1 ? others[0]!.accountName : others.map((line) => line.accountName).join(", ");
+        return bank.amountCents < 0
+          ? ref("paymentOut", { amount: euros(bank.amountCents), bank: bank.accountName, counter })
+          : ref("paymentIn", { amount: euros(bank.amountCents), bank: bank.accountName, counter });
+      }
+    }
+    if (debits.length === 1 && credits.length === 1) {
+      return ref("transfer", { amount: euros(debits[0]!.amountCents), from: credits[0]!.accountName, to: debits[0]!.accountName });
+    }
   }
   return manual;
 }

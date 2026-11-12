@@ -18,9 +18,11 @@ import {
   LEDGER_ACCOUNT_GROUPS,
   LEDGER_ACTION_ERROR_CODES,
   LEDGER_OWNER_TYPES,
+  MATCH_SUGGESTION_REASONS,
   OPEN_ITEM_ACCOUNT_STATUSES,
   OPEN_ITEM_MATCH_KINDS,
   PERIOD_STATUSES,
+  PROPOSAL_TEMPLATES,
   PROPOSAL_WARNING_CODES,
   REVISION_CHANGE_KINDS,
   TAX_CODES,
@@ -61,6 +63,8 @@ describe("Ledger messages", () => {
   it.each(CONTROL_STATUSES)("controlStatuses.%s resolves", (status) => expect(typeof flat("controlStatuses")[status]).toBe("string"));
   it.each(CONTROL_IDS)("controls.%s has a title", (id) => expect(typeof (flat("controls")[id] as Record<string, unknown>).title).toBe("string"));
   it.each(ENTRY_SUMMARY_KINDS)("summaries.%s resolves", (kind) => expect(typeof flat("summaries")[kind]).toBe("string"));
+  it.each(PROPOSAL_TEMPLATES)("templates.%s resolves", (template) => expect(typeof flat("templates")[template]).toBe("string"));
+  it.each(MATCH_SUGGESTION_REASONS)("matchSuggestionReasons.%s resolves", (reason) => expect(typeof flat("matchSuggestionReasons")[reason]).toBe("string"));
 
   it("every message key a control can produce renders", () => {
     const t = createTranslator({ locale: "de", messages: de, namespace: "Ledger" });

@@ -45,6 +45,10 @@ export const lineInputSchema = z.object({
     .refine((value) => value !== 0),
   taxCode: z.enum(TAX_CODES).nullable().optional(),
   amountMode: z.enum(AMOUNT_MODES).optional(),
+  /** The tax printed on the document (see `BaseLineInput.taxCents`). */
+  taxCents: z.number().int().min(-MAX_LINE_AMOUNT_CENTS).max(MAX_LINE_AMOUNT_CENTS).nullable().optional(),
+  /** The open item the line books or pays (a document of the same workspace). */
+  documentId: z.uuid().nullable().optional(),
   text: optionalText(300),
 });
 export type LineInput = z.infer<typeof lineInputSchema>;
@@ -200,5 +204,13 @@ export const uploadAdvisorInputSchema = z
   .object({ periodFrom: isoDate, periodTo: isoDate, fileName: optionalText(255), csvText: z.string().min(1).max(MAX_ADVISOR_CSV_LENGTH) })
   .refine((value) => value.periodFrom <= value.periodTo, { path: ["periodTo"] });
 export const advisorUploadIdInputSchema = z.object({ uploadId: z.uuid() });
+
+/** `syncProposals`: which sources to propose for, by their date; both optional. */
+export const syncProposalsInputSchema = z
+  .object({ from: isoDate.optional(), to: isoDate.optional() })
+  .refine((value) => !value.from || !value.to || value.from <= value.to, { path: ["to"] });
+export type SyncProposalsInput = z.infer<typeof syncProposalsInputSchema>;
+
+export const suggestMatchesInputSchema = z.object({ accountId: z.uuid() });
 
 export const yearInputSchema = z.object({ year: z.number().int().min(2000).max(2100) });

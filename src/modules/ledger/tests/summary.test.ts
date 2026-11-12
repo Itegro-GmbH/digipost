@@ -59,11 +59,17 @@ describe("summarizeEntry", () => {
     );
   });
 
-  it("transfer (top-up of the Meta credit, share capital)", () => {
+  it("payments: the top-up of the Meta credit out, the share capital in", () => {
     expect(render([{ accountNumber: "1461", amountCents: 10000 }, { accountNumber: "1800", amountCents: -10000 }])).toBe(
-      "100,00 € von Bank Finom Main nach Verrechnungskonto Meta umgebucht.",
+      "Zahlung von 100,00 € von Bank Finom Main, gebucht auf Verrechnungskonto Meta.",
     );
-    expect(summarizeEntry(lines([{ accountNumber: "1800", amountCents: 416700 }, { accountNumber: "2900", amountCents: -416700 }])).key).toBe("summaries.transfer");
+    expect(render([{ accountNumber: "1800", amountCents: 416700 }, { accountNumber: "2900", amountCents: -416700 }])).toBe(
+      "Zahlungseingang von 4.167,00 € auf Bank Finom Main, gebucht auf Gezeichnetes Kapital.",
+    );
+  });
+
+  it("transfer between money accounts (bank to money in transit)", () => {
+    expect(render([{ accountNumber: "1360", amountCents: 5000 }, { accountNumber: "1800", amountCents: -5000 }])).toBe("50,00 € von Bank Finom Main nach Geldtransit umgebucht.");
   });
 
   it("split (court fee 300 + dunning fee 5)", () => {

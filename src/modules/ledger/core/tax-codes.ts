@@ -98,6 +98,12 @@ export type BaseLineInput = {
   /** Default `gross`: what an invoice prints as its total. Ignored for `rc13b` (a foreign
    * supplier's invoice carries no German VAT, so its amount is the net). */
   amountMode?: AmountMode;
+  /** The tax printed on the document, used instead of the computed one for an input or output
+   * tax code (the proposal engine books an invoice's exact printed figures). Ignored when its
+   * sign differs from the amount's or it exceeds the amount. */
+  taxCents?: number | null;
+  /** The open item this line belongs to (the document it books or pays), for matching. */
+  documentId?: string | null;
   text?: string | null;
 };
 
@@ -108,8 +114,17 @@ export type ExpandedLine = {
   taxCode: TaxCode | null;
   taxRole: TaxRole | null;
   generatedFromLinePosition: number | null;
+  /** Copied from the base line onto its generated tax lines. */
+  documentId: string | null;
   text: string | null;
 };
+
+/** A printed tax amount that can stand in for the computed one: same sign, not larger. */
+function usablePrintedTax(taxCents: number | null | undefined, amountCents: number): taxCents is number {
+  if (taxCents === null || taxCents === undefined || !Number.isInteger(taxCents)) return false;
+  if (taxCents === 0) return true;
+  return Math.sign(taxCents) === Math.sign(amountCents) && Math.abs(taxCents) <= Math.abs(amountCents);
+}
 
 /**
  * Base lines to base plus generated tax lines, positions numbered from 1, each tax line right
@@ -129,36 +144,38 @@ export function expandTaxLines(lines: readonly BaseLineInput[]): ExpandedLine[] 
   for (const line of lines) {
     const code = line.taxCode ?? null;
     const text = line.text ?? null;
+    const documentId = line.documentId ?? null;
     if (!code) {
-      out.push({ position: out.length + 1, accountNumber: line.accountNumber, amountCents: line.amountCents, taxCode: null, taxRole: null, generatedFromLinePosition: null, text });
+      out.push({ position: out.length + 1, accountNumber: line.accountNumber, amountCents: line.amountCents, taxCode: null, taxRole: null, generatedFromLinePosition: null, documentId, text });
       continue;
     }
     const def = TAX_CODE_DEFINITIONS[code];
     const mode = line.amountMode ?? "gross";
 
     if (def.kind === "reverse_charge" && def.reverseChargeAccounts) {
-      const base = { position: out.length + 1, accountNumber: line.accountNumber, amountCents: line.amountCents, taxCode: code, taxRole: "base" as const, generatedFromLinePosition: null, text };
+      const base = { position: out.length + 1, accountNumber: line.accountNumber, amountCents: line.amountCents, taxCode: code, taxRole: "base" as const, generatedFromLinePosition: null, documentId, text };
       out.push(base);
       const tax = taxFromNet(line.amountCents, def.ratePercent);
       if (tax !== 0) {
-        out.push({ position: out.length + 1, accountNumber: def.reverseChargeAccounts.input, amountCents: tax, taxCode: code, taxRole: "tax", generatedFromLinePosition: base.position, text: null });
-        out.push({ position: out.length + 1, accountNumber: def.reverseChargeAccounts.output, amountCents: -tax, taxCode: code, taxRole: "tax", generatedFromLinePosition: base.position, text: null });
+        out.push({ position: out.length + 1, accountNumber: def.reverseChargeAccounts.input, amountCents: tax, taxCode: code, taxRole: "tax", generatedFromLinePosition: base.position, documentId, text: null });
+        out.push({ position: out.length + 1, accountNumber: def.reverseChargeAccounts.output, amountCents: -tax, taxCode: code, taxRole: "tax", generatedFromLinePosition: base.position, documentId, text: null });
       }
       continue;
     }
 
     if ((def.kind === "input" || def.kind === "output") && def.taxAccountNumber) {
-      const tax = mode === "gross" ? taxFromGross(line.amountCents, def.ratePercent) : taxFromNet(line.amountCents, def.ratePercent);
+      const computed = mode === "gross" ? taxFromGross(line.amountCents, def.ratePercent) : taxFromNet(line.amountCents, def.ratePercent);
+      const tax = usablePrintedTax(line.taxCents, line.amountCents) ? line.taxCents : computed;
       const baseCents = mode === "gross" ? line.amountCents - tax : line.amountCents;
-      const base = { position: out.length + 1, accountNumber: line.accountNumber, amountCents: baseCents, taxCode: code, taxRole: "base" as const, generatedFromLinePosition: null, text };
+      const base = { position: out.length + 1, accountNumber: line.accountNumber, amountCents: baseCents, taxCode: code, taxRole: "base" as const, generatedFromLinePosition: null, documentId, text };
       out.push(base);
       if (tax !== 0) {
-        out.push({ position: out.length + 1, accountNumber: def.taxAccountNumber, amountCents: tax, taxCode: code, taxRole: "tax", generatedFromLinePosition: base.position, text: null });
+        out.push({ position: out.length + 1, accountNumber: def.taxAccountNumber, amountCents: tax, taxCode: code, taxRole: "tax", generatedFromLinePosition: base.position, documentId, text: null });
       }
       continue;
     }
 
-    out.push({ position: out.length + 1, accountNumber: line.accountNumber, amountCents: line.amountCents, taxCode: code, taxRole: "base", generatedFromLinePosition: null, text });
+    out.push({ position: out.length + 1, accountNumber: line.accountNumber, amountCents: line.amountCents, taxCode: code, taxRole: "base", generatedFromLinePosition: null, documentId, text });
   }
   return out;
 }

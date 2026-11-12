@@ -82,6 +82,66 @@ export {
   type AdvisorParseResult,
 } from "./core/advisor";
 export { summarizeEntry, type SummaryLine } from "./core/summary";
+export type {
+  AdviceAccount,
+  AdviceTaxBreakdownEntry,
+  BookingAdvice,
+  BookingAdviceQuestion,
+  BookingAdviceRaw,
+  BookingAdviceRawLine,
+  LedgerBookingAdvisor,
+} from "./core/ports";
+export {
+  ADVICE_TAX_CODES,
+  bookingAdviceCacheKey,
+  createFakeLedgerBookingAdvisor,
+  MAX_ADVICE_SPLIT_LINES,
+  toCacheableBookingAdvice,
+  validateBookingAdvice,
+} from "./core/booking-advisor";
+export {
+  adviceQuestionsFor,
+  buildProposals,
+  DEFAULT_EXPENSE_ACCOUNT,
+  DEFAULT_FEE_ACCOUNT,
+  documentSourceKey,
+  invoiceSourceKey,
+  invoiceVatGroups,
+  isEuCountry,
+  isForeignParty,
+  LEDGER_SETTLEMENT_DOCUMENT_KINDS,
+  MONEY_IN_TRANSIT_ACCOUNT,
+  PAYABLES_ACCOUNT,
+  RECEIVABLES_ACCOUNT,
+  REVENUE_ACCOUNTS,
+  ruleForDocument,
+  ruleForTransaction,
+  settlementSourceKey,
+  transactionSourceKey,
+  type AdviceMap,
+  type InvoiceLineForGroups,
+  type ProposalAccount,
+  type ProposalDocument,
+  type ProposalDraft,
+  type ProposalInvoice,
+  type ProposalInvoiceGroup,
+  type ProposalPlan,
+  type ProposalRule,
+  type ProposalSettlementLine,
+  type ProposalSnapshot,
+  type ProposalTaxBreakdownEntry,
+  type ProposalTransaction,
+} from "./core/proposals";
+export {
+  findAutoMatches,
+  MAX_SUBSET_CANDIDATES,
+  MAX_SUBSET_SIZE,
+  MAX_SUGGESTIONS,
+  suggestMatchGroups,
+  type AutoMatch,
+  type OpenItemLine,
+} from "./core/open-item-matching";
+export { counterpartyPatternOf, deriveRuleFromEntry, MAX_RULE_PATTERN_LENGTH, type RuleLearningInput, type RuleLearningLine } from "./core/rule-learning";
 export {
   accountIdInputSchema,
   accountNumberSchema,
@@ -111,6 +171,8 @@ export {
   ruleInputSchema,
   settingsInputSchema,
   submitFilingInputSchema,
+  suggestMatchesInputSchema,
+  syncProposalsInputSchema,
   updateAccountInputSchema,
   updateEntryInputSchema,
   updateRuleInputSchema,
@@ -125,6 +187,7 @@ export {
   type ProposalInput,
   type RuleInput,
   type SettingsInput,
+  type SyncProposalsInput,
   type UpdateAccountInput,
 } from "./core/schemas";
 export {

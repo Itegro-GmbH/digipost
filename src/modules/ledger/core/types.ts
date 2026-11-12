@@ -112,11 +112,36 @@ export const ENTRY_SUMMARY_KINDS = [
   "expensePaidByShareholder",
   "reverseCharge",
   "revenue",
+  "platformReport",
+  "paymentOut",
+  "paymentIn",
   "transfer",
   "split",
   "manual",
 ] as const;
 export type EntrySummaryKind = (typeof ENTRY_SUMMARY_KINDS)[number];
+
+/** The fixed templates of the proposal engine (decisions/0080 phase 3, `core/proposals.ts`). A
+ * template proposal stores `template:<id>` as its `originReason`, a rule proposal `rule:<ruleId>`,
+ * an AI proposal the AI's one German sentence. Shown through `Ledger.templates.<id>`. */
+export const PROPOSAL_TEMPLATES = [
+  "incoming_invoice",
+  "outgoing_document",
+  "outgoing_invoice",
+  "settlement_report",
+  "bank_document_payment",
+  "bank_clearing_pair",
+  "bank_contact_account",
+  "bank_person_account",
+  "bank_own_transfer",
+  "bank_no_document_rule",
+] as const;
+export type ProposalTemplate = (typeof PROPOSAL_TEMPLATES)[number];
+
+/** Why `suggestMatches` proposes a group of open items: the lines book and pay the same document,
+ * or a combination of payments adds up to an invoice (Google Ads 10 + 50 + 36,57 = 96,57). */
+export const MATCH_SUGGESTION_REASONS = ["same_document", "subset_sum"] as const;
+export type MatchSuggestionReason = (typeof MATCH_SUGGESTION_REASONS)[number];
 
 /** An i18n key under `Ledger.` plus the ICU values it needs. Never free text. */
 export type MessageRef = { key: string; params: Record<string, string | number> };
@@ -159,6 +184,8 @@ export type JournalLineView = {
   taxCode: TaxCode | null;
   taxRole: TaxRole | null;
   generatedFromLinePosition: number | null;
+  /** The open item this line books or pays (a document id), for matching. */
+  documentId: string | null;
   text: string | null;
 };
 
@@ -219,7 +246,7 @@ export type EntrySnapshot = {
   dismissed: boolean;
   documentId: string | null;
   transactionId: string | null;
-  lines: { accountNumber: string; amountCents: number; taxCode: TaxCode | null; taxRole: TaxRole | null; text: string | null }[];
+  lines: { accountNumber: string; amountCents: number; taxCode: TaxCode | null; taxRole: TaxRole | null; text: string | null; documentId?: string | null }[];
 };
 
 export type BookingRuleView = {
@@ -294,4 +321,31 @@ export type OpenItemAccountSummary = {
   balanceCents: number;
   status: OpenItemAccountStatus;
   unmatchedCount: number;
+};
+
+/** One candidate group of `suggestMatches`: open lines of one open-item account that sum to zero. */
+export type MatchSuggestion = {
+  accountId: string;
+  reason: MatchSuggestionReason;
+  lineIds: string[];
+  /** The debit side of the group (what it settles). */
+  amountCents: number;
+};
+
+/** What one `syncProposals` run did. */
+export type SyncProposalsResult = {
+  created: number;
+  updated: number;
+  /** Proposals that were already up to date, or that a human booked, edited or dismissed. */
+  kept: number;
+  /** Proposals the use case refused (an archived account, a source gone since the read). */
+  failed: number;
+  /** Sources with no safe proposal (an unexplained bank transaction, a document without amount). */
+  unproposed: number;
+  /** Documents left for the next run because this run's AI budget was used up. */
+  deferred: number;
+  aiAsked: number;
+  aiCached: number;
+  aiUnavailable: number;
+  autoMatched: number;
 };

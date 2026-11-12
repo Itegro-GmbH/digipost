@@ -28,6 +28,7 @@ export const LEDGER_USE_CASE_ERROR_CODES = [
   "match_not_zero",
   "owner_taken",
   "advisor_file_invalid",
+  "rule_source_missing",
 ] as const;
 export type LedgerUseCaseErrorCode = (typeof LEDGER_USE_CASE_ERROR_CODES)[number];
 
