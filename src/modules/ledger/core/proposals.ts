@@ -833,6 +833,19 @@ function proposeInvoices(ctx: Context, plan: ProposalPlan): void {
   }
 }
 
+/**
+ * What a fee line costs (positive) or gives back (negative, a refunded fee). The same rule as
+ * `src/modules/accounts`' `settlementFeeEffectCents`, which writes these lines: a fee next to its
+ * sale (gross on the same row) is a positive magnitude and always a cost; a row that is nothing
+ * but a fee (no gross, its net is the fee: Google's commission and each refunded commission)
+ * carries its own sign, negative for the commission, positive for its refund.
+ */
+function feeExpenseCents(line: ProposalSettlementLine): number {
+  const fee = line.feeCents ?? 0;
+  if (line.grossCents === null && line.netCents !== null && Math.abs(line.netCents) === Math.abs(fee)) return -line.netCents;
+  return Math.abs(fee);
+}
+
 /** The fee account and tax code of a platform: a rule naming the platform, else 6855. */
 function feeTargetFor(ctx: Context, platform: string | null, label: string): { accountNumber: string; taxCode: TaxCode | null; rule: ProposalRule | null } {
   const name = `${platform ?? ""} ${label}`.toLowerCase();
@@ -874,7 +887,7 @@ function proposeSettlements(ctx: Context, plan: ProposalPlan, platformLabel: (pl
     const revenueCents = group.lines
       .filter((line) => line.type === "revenue" || line.type === "refund" || line.type === "adjustment")
       .reduce((sum, line) => sum + (line.grossCents ?? line.netCents ?? 0), 0);
-    const feeCents = group.lines.filter((line) => line.type === "fee").reduce((sum, line) => sum + Math.abs(line.feeCents ?? 0), 0);
+    const feeCents = group.lines.filter((line) => line.type === "fee").reduce((sum, line) => sum + feeExpenseCents(line), 0);
     const fee = feeTargetFor(ctx, group.platform, label);
     const lines: LineInput[] = [];
     if (revenueCents !== 0) lines.push({ accountNumber: REVENUE_ACCOUNTS.euNotTaxable, amountCents: -revenueCents, taxCode: "eu_not_taxable", documentId: null });

@@ -267,6 +267,15 @@ export function createFakeTransactionRepository(
       return rows.filter((r) => r.accountId === accountId && idempotencyKeys.includes(r.idempotencyKey));
     },
 
+    async deleteByIdempotencyKeys(workspaceId, accountId, idempotencyKeys) {
+      const before = rows.length;
+      for (let i = rows.length - 1; i >= 0; i--) {
+        const row = rows[i]!;
+        if (row.workspaceId === workspaceId && row.accountId === accountId && idempotencyKeys.includes(row.idempotencyKey)) rows.splice(i, 1);
+      }
+      return before - rows.length;
+    },
+
     async setTransferGroup(transactionIds, transferGroupId) {
       for (const row of rows) {
         if (transactionIds.includes(row.id)) row.transferGroupId = transferGroupId;
@@ -353,6 +362,15 @@ export function createFakeSettlementLineRepository(seed: SettlementLineRow[] = [
 
     async listForDocument(workspaceId, documentId) {
       return rows.filter((r) => r.workspaceId === workspaceId && r.sourceDocumentId === documentId);
+    },
+
+    async deleteByIds(workspaceId, ids) {
+      const before = rows.length;
+      for (let i = rows.length - 1; i >= 0; i--) {
+        const row = rows[i]!;
+        if (row.workspaceId === workspaceId && ids.includes(row.id)) rows.splice(i, 1);
+      }
+      return before - rows.length;
     },
 
     async sumFeeCentsForAccountAndPeriod(clearingAccountId, monthStart, monthEnd) {

@@ -134,8 +134,10 @@ framework-free functions with no I/O, no database, and no UI, exactly the same s
 - `core/google-play-earnings.ts` - `detectGooglePlayEarnings`/`parseGooglePlayEarnings`
   (decisions/0048-app-store-reports.md): Google Play's monthly earnings report, a fourth
   self-identifying, deterministic format - recognized by an exact 26-column header.
-  `Transaction Type` (`Charge`/`Refund`/`Google fee`/`Google fee refund`/anything else) decides
-  each row's `gross`/`fee`/neither shape; dates are `"Jan 5, 2025"`, parsed by this file's own
+  `Transaction Type` decides each row's shape: `Google fee` and `Google fee refund` are fee rows
+  (`feeCents` and `netCents` with the report's own sign, negative for the fee, positive for its
+  refund; corrected 2026-11, see `src/modules/accounts/README.md`'s "Google fee refunds"), every
+  other row (`Charge`, `Charge refund`, `Tax`, anything new) is a gross row with its own sign; dates are `"Jan 5, 2025"`, parsed by this file's own
   `parseGoogleDate` (never `mapping-validator.ts`'s `parseDateToIso`, which this format never
   routes through).
 - `core/idempotency-key.ts` - `normalizeReference`, `computeIdempotencyKeyV2`,

@@ -374,8 +374,12 @@ Templates, from certain to uncertain:
   printed tax fields, a rule, or `ust19` from the gross with `no_tax_breakdown`.
 - **Platform report** (`settlement:<documentId>:<YYYY-MM>`, booked on the month end or the
   report's period end), Apple and Google only (the commissionaire model: the store sells in its
-  own name, so the revenue is a supply to it): revenue and refunds on 4339 `eu_not_taxable`, fees
-  on 6855 (Google: `rc13b`) or a rule whose pattern names the platform, against the platform's
+  own name, so the revenue is a supply to it): revenue and refunds on 4339 `eu_not_taxable`
+  (charges minus charge refunds, withheld taxes included), fees on 6855 (Google: `rc13b`) or a
+  rule whose pattern names the platform (fees minus refunded fees: a fee line without a gross
+  whose net is the fee carries its own sign, so Google's "Google fee refund" reduces the fees;
+  a fee next to its sale is always a cost; the same rule as `src/modules/accounts`'
+  `settlementFeeEffectCents`), against the platform's
   receivable (1370 ff.), the receivable line carrying the report. Any other platform (Stripe,
   PayPal, Amazon, other) collects for the seller and needs another booking: no proposal, and the
   sync names the problem `unsupported_platform_settlement`.

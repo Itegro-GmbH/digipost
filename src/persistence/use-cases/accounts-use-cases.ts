@@ -429,8 +429,30 @@ async function importSettlementReportDocument(
 
   const linesTotal = drafts.length;
   let linesImported = 0;
+  let linesReplaced = 0;
 
   await deps.uow.transaction(async (repos) => {
+    // Re-import after a reader fix (src/modules/accounts/README.md, "Re-import"): a stored line
+    // the report no longer yields, or yields with other figures, is removed together with its
+    // clearing-account transaction, so the fresh draft is inserted in its place below. A line
+    // that is still the same is left alone, with its transaction and any match on it.
+    const draftByKey = new Map(drafts.map((draft) => [draft.externalLineId, draft]));
+    const stale = (await repos.settlementLine.listForDocument(workspaceId, documentId)).filter((line) => {
+      const draft = draftByKey.get(line.externalLineId);
+      return !draft || !sameSettlementLine(line, draft);
+    });
+    if (stale.length > 0) {
+      await repos.transaction.deleteByIdempotencyKeys(
+        workspaceId,
+        clearingAccountId,
+        stale.map((line) => `settlement:${documentId}:${line.externalLineId}`),
+      );
+      linesReplaced = await repos.settlementLine.deleteByIds(
+        workspaceId,
+        stale.map((line) => line.id),
+      );
+    }
+
     await repos.transaction.insertManyIdempotent(transactionRows);
     // `insertManyIdempotent` only returns rows it actually inserted - a settlement line's own
     // `transactionId` must resolve regardless of whether this run inserted it or a previous
@@ -474,7 +496,9 @@ async function importSettlementReportDocument(
       await tryPairPayout(repos, workspaceId, { id: tx.id, amountCents: tx.amountCents, bookingDate: tx.bookingDate, payoutId: draft.payoutId });
     }
 
-    if (insertedLines.length > 0) {
+    // A replaced line counts as new evidence too: the matching run that follows also schedules
+    // the ledger's proposal sync, which updates the report's untouched proposal.
+    if (insertedLines.length > 0 || linesReplaced > 0) {
       await repos.jobs.enqueue({
         kind: JOB_KINDS.matchSettlementLines,
         workspaceId,
@@ -484,6 +508,18 @@ async function importSettlementReportDocument(
   });
 
   return { status: "settlement_imported", accountId: clearingAccountId, accountCreated, linesTotal, linesImported, linesDuplicate: linesTotal - linesImported };
+}
+
+/** Whether a stored settlement line is what the report yields for its key today. */
+function sameSettlementLine(line: SettlementLineRow, draft: SettlementLineDraft): boolean {
+  return (
+    line.type === draft.type &&
+    line.grossCents === draft.grossCents &&
+    line.feeCents === draft.feeCents &&
+    line.netCents === draft.netCents &&
+    line.bookingDate === draft.bookingDate &&
+    line.payoutId === draft.payoutId
+  );
 }
 
 // --- decisions/0068-supplier-clearing-accounts.md: a clearing account owned by a CONTACT ---

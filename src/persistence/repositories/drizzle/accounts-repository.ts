@@ -334,6 +334,15 @@ export function createDrizzleTransactionRepository(db: DbExecutor): TransactionR
         .where(and(eq(transactions.accountId, accountId), inArray(transactions.idempotencyKey, idempotencyKeys)));
     },
 
+    async deleteByIdempotencyKeys(workspaceId, accountId, idempotencyKeys) {
+      if (idempotencyKeys.length === 0) return 0;
+      const deleted = await db
+        .delete(transactions)
+        .where(and(eq(transactions.workspaceId, workspaceId), eq(transactions.accountId, accountId), inArray(transactions.idempotencyKey, idempotencyKeys)))
+        .returning({ id: transactions.id });
+      return deleted.length;
+    },
+
     async setTransferGroup(transactionIds, transferGroupId) {
       if (transactionIds.length === 0) return;
       await db.update(transactions).set({ transferGroupId }).where(inArray(transactions.id, transactionIds));
@@ -438,6 +447,15 @@ export function createDrizzleSettlementLineRepository(db: DbExecutor): Settlemen
         .from(settlementLines)
         .where(and(eq(settlementLines.workspaceId, workspaceId), eq(settlementLines.sourceDocumentId, documentId)))
         .orderBy(asc(settlementLines.bookingDate)),
+
+    async deleteByIds(workspaceId, ids) {
+      if (ids.length === 0) return 0;
+      const deleted = await db
+        .delete(settlementLines)
+        .where(and(eq(settlementLines.workspaceId, workspaceId), inArray(settlementLines.id, ids)))
+        .returning({ id: settlementLines.id });
+      return deleted.length;
+    },
 
     async sumFeeCentsForAccountAndPeriod(clearingAccountId, monthStart, monthEnd) {
       const [row] = await db

@@ -11,6 +11,7 @@ import { getDocumentPaymentSectionProjection, getSettlementReportProjection, lis
 import { PaymentSection, SettlementReportSection, type ManualLinkCandidate } from "@/modules/payments/client";
 import { getLedgerDocumentStatusProjection } from "@/modules/ledger/server";
 import { DocumentLedgerCard } from "@/modules/ledger/client";
+import { ReimportButton } from "@/modules/accounts/client";
 
 // F3b (decisions/0025-payment-matching-wiring.md): caps how many unmatched transactions the
 // "Transaktion manuell verknüpfen" dropdown offers - a plain recency-bounded slice, not scored
@@ -76,6 +77,13 @@ export default async function DocumentDetailPage({ params }: PageProps<"/dashboa
         <PaymentSection documentId={id} section={paymentSection} canManage={canManageFinance} manualLinkCandidates={candidates} />
       ) : null}
       {settlementReport ? <SettlementReportSection report={settlementReport} /> : null}
+      {/* Re-reads the stored report with the current reader (src/modules/accounts/README.md,
+          "Re-import"): how a reader fix reaches a report imported before it. */}
+      {settlementReport && canManageFinance ? (
+        <div className="flex justify-end">
+          <ReimportButton documentId={id} />
+        </div>
+      ) : null}
       {ledgerStatus ? <DocumentLedgerCard status={ledgerStatus} documentId={id} canManage={canManageFinance} /> : null}
     </div>
   );

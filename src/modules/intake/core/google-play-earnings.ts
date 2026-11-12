@@ -4,14 +4,13 @@
 // has no other reason to see, recognized without ever asking the model.
 //
 // Shape: one row per order/adjustment, `Transaction Type` telling apart a `Charge` (revenue),
-// a `Google fee` (Google's own cut, already a negative amount in the source), a `Refund`, a
-// `Google fee refund` (a reversed fee, already a positive amount in the source - this reader
-// never flips a sign itself, the source states it correctly either way), and anything else
-// (`Tax`, ...) treated as a plain adjustment that still counts toward the report's own net but
-// produces no `gross`/`fee` ledger draft on its own (mirrors decisions/0026-platform-settlements.md's
-// own "a row with neither contributes nothing beyond its own fields" rule). English dates
-// (`"Jan 5, 2025"`) and a quoted comma inside them are the reason the generic tabular path
-// rejected this file before this phase - see `file-kind.ts`'s quote-aware delimiter count.
+// a `Google fee` (Google's own cut, already a negative amount in the source), a `Charge refund`
+// (a refunded sale, negative), a `Google fee refund` (the refunded share of Google's cut,
+// positive), and anything else (`Tax`, ...) treated as a plain adjustment on the revenue side
+// with its own sign. This reader never flips a sign itself, the source states it correctly
+// either way. English dates (`"Jan 5, 2025"`) and a quoted comma inside them are the reason the
+// generic tabular path rejected this file before this phase - see `file-kind.ts`'s quote-aware
+// delimiter count.
 import { parse as parseCsvSync } from "csv-parse/sync";
 
 import { parseAmountToCents, US_AMOUNT_FORMAT } from "./amount-parsing";
@@ -51,12 +50,15 @@ const REQUIRED_COLUMNS = [
   "Amount (Merchant Currency)",
 ] as const;
 
-// decisions/0052: only Google's own commission counts as a fee line, and only it is deducted
-// (`buildSettlementLineDrafts` books a fee as a deduction, because Stripe states its fees as
-// positive numbers). Every other row - a charge, a refund, a tax withheld, a REFUNDED fee, an
-// unknown future type - goes to the revenue side with its own sign, so no row is ever dropped and
-// the imported lines always add up to the report's own net.
-const FEE_TRANSACTION_TYPES = ["Google fee"] as const;
+// decisions/0052, corrected 2026-11 (src/modules/accounts/README.md, "Google fee refunds"):
+// Google's commission and its refund are the fee side. A `Google fee` row (negative) and a
+// `Google fee refund` row (positive) both become a fee line with the report's own sign in
+// `feeCents` and `netCents`, so the fees of a month are the fees minus the refunded fees.
+// Every other row - a charge, a charge refund, a tax withheld, an unknown future type - goes to
+// the revenue side with its own sign, so no row is ever dropped and the imported lines always
+// add up to the report's own net. (decisions/0052 had put the refunded fee on the revenue side,
+// which overstated revenue and fees by the same amount.)
+const FEE_TRANSACTION_TYPES = ["google fee", "google fee refund"] as const;
 
 function parseCsv(text: string): string[][] {
   return parseCsvSync(text, { relax_column_count: true, relax_quotes: true, skip_empty_lines: true, bom: true }) as string[][];
@@ -173,7 +175,7 @@ export function parseGooglePlayEarnings(text: string): GooglePlayEarningsResult 
     netAmountCents += amountCents;
 
     const type = (row[typeIndex] ?? "").trim();
-    const isFee = (FEE_TRANSACTION_TYPES as readonly string[]).includes(type);
+    const isFee = (FEE_TRANSACTION_TYPES as readonly string[]).includes(type.toLowerCase());
     const orderId = (row[descriptionIndex] ?? "").trim() || null;
     const productName = (row[productTitleIndex] ?? "").trim() || null;
 

@@ -556,6 +556,67 @@ describe("buildProposals: platform reports and payouts", () => {
   });
 });
 
+describe("buildProposals: Google Play fee refunds (July 2026)", () => {
+  // The owner's July report: charges minus a charge refund are 13,36, Google's fees minus the
+  // refunded fees 2,01, net 11,35. A refunded fee is a fee line with a positive amount
+  // (`src/modules/accounts`' reader, corrected 2026-11); stored as revenue it had booked
+  // revenue 36,29 and fees 24,94.
+  const report = doc("gp-07", { kind: "platform_settlement", direction: "unknown", platform: "google", totalAmountCents: null, servicePeriodTo: "2026-07-31" });
+  const line = (id: string, type: "revenue" | "refund" | "fee", cents: number) => ({
+    id,
+    documentId: "gp-07",
+    platform: "google",
+    type,
+    grossCents: type === "fee" ? null : cents,
+    feeCents: type === "fee" ? cents : null,
+    netCents: cents,
+    bookingDate: "2026-07-12",
+  });
+
+  it("books revenue as charges minus charge refunds and fees as fees minus fee refunds", async () => {
+    const result = await plan(
+      snapshot({
+        documents: [report],
+        settlementLines: [
+          line("charge-1", "revenue", 1430),
+          line("charge-2", "revenue", 1070),
+          line("charge-refund", "refund", -1164),
+          line("fee-1", "fee", -375),
+          line("fee-2", "fee", -2119),
+          line("fee-refund-1", "fee", 1071),
+          line("fee-refund-2", "fee", 1222),
+        ],
+      }),
+    );
+    expect(booked(draftFor(result, "settlement:gp-07:2026-07"))).toEqual([
+      ["4339", -1336, "eu_not_taxable", null],
+      ["6855", 201, "rc13b", null],
+      ["1407", 38, "rc13b", null],
+      ["3837", -38, "rc13b", null],
+      ["1371", 1135, null, "gp-07"],
+    ]);
+  });
+
+  it("still deducts a fee stated as a positive magnitude next to its sale", async () => {
+    const result = await plan(
+      snapshot({
+        documents: [report],
+        settlementLines: [
+          { id: "r", documentId: "gp-07", platform: "google", type: "revenue", grossCents: 1000, feeCents: 150, netCents: 850, bookingDate: "2026-07-12" },
+          { id: "f", documentId: "gp-07", platform: "google", type: "fee", grossCents: 1000, feeCents: 150, netCents: 850, bookingDate: "2026-07-12" },
+        ],
+      }),
+    );
+    expect(booked(draftFor(result, "settlement:gp-07:2026-07")).map(([accountNumber, cents]) => [accountNumber, cents])).toEqual([
+      ["4339", -1000],
+      ["6855", 150],
+      ["1407", 29],
+      ["3837", -29],
+      ["1371", 850],
+    ]);
+  });
+});
+
 describe("buildProposals: bank transactions", () => {
   it("share capital via a no-document rule (wins over the shareholder's own account)", async () => {
     const result = await plan(

@@ -127,18 +127,22 @@ describe("the November 2025 column renaming", () => {
 });
 
 // decisions/0052: the owner's 2025 reports contain five row types. "Charge refund" and "Tax"
-// produced no settlement line at all and "Google fee refund" was booked as another deduction, so
-// the Google clearing account was 60,50 EUR off what the reports actually earned.
+// produced no settlement line at all. Corrected 2026-11: "Google fee refund" is the fee side
+// with its own positive sign (decisions/0052 had put it on the revenue side, so revenue and fees
+// were both overstated by the refunded fee).
 describe("every row type ends up in the settlement lines", () => {
   const ALL_TYPES = "google-play-earnings-all-row-types.csv";
 
-  it("puts every non-fee row on the revenue side and keeps the fee sign", () => {
+  it("puts charges, charge refunds and taxes on the revenue side, Google's fee and its refund on the fee side", () => {
     const result = parseGooglePlayEarnings(readFixtureText(ALL_TYPES));
     const revenueSide = result.lines.filter((line) => line.grossCents !== null);
     const feeSide = result.lines.filter((line) => line.feeCents !== null);
-    expect(revenueSide).toHaveLength(4); // Charge, Charge refund, Tax, and the refunded fee
-    expect(feeSide).toHaveLength(1); // only Google's own commission is deducted as a fee
-    expect(revenueSide.some((line) => (line.grossCents ?? 0) > 0)).toBe(true);
+    expect(revenueSide.map((line) => line.grossCents)).toEqual([973, -503, -197]); // Charge, Charge refund, Tax
+    expect(feeSide.map((line) => [line.feeCents, line.netCents])).toEqual([
+      [-146, -146], // Google fee
+      [75, 75], // Google fee refund: positive, reduces the fees
+    ]);
+    expect(result.lines.every((line) => line.grossCents === null || line.feeCents === null)).toBe(true);
   });
 
   it("keeps the sum of the lines equal to the report's own net", () => {

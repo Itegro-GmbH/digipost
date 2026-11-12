@@ -299,6 +299,11 @@ export interface TransactionRepository {
    * inserted it or it already existed from a previous import run (that method only returns
    * rows it actually inserted, never one skipped by `ON CONFLICT DO NOTHING`). */
   findByIdempotencyKeys(accountId: string, idempotencyKeys: string[]): Promise<TransactionRow[]>;
+  /** A settlement report's re-import (`importSettlementReport`): removes the clearing-account
+   * transactions of lines the report no longer yields, or yields differently, so the fresh ones
+   * can be inserted under the same keys. Their `document_transactions` rows go with them by the
+   * foreign key's cascade. Returns how many were deleted. */
+  deleteByIdempotencyKeys(workspaceId: string, accountId: string, idempotencyKeys: string[]): Promise<number>;
   /** F4's payout-to-bank-deposit pairing (decisions/0026): sets the same `transferGroupId` on
    * both the clearing account's `payout` transaction and the matching bank deposit. Always
    * exactly two ids in practice; the array shape (not two separate parameters) mirrors
@@ -354,6 +359,10 @@ export interface SettlementLineRepository {
   /** Every settlement line this document produced - the report detail page's own decomposition
    * (revenue/fee/refund/payout) and "Rechnung fehlt" list (F4). */
   listForDocument(workspaceId: string, documentId: string): Promise<SettlementLineRow[]>;
+  /** A settlement report's re-import: removes lines the report no longer yields, or yields
+   * differently (a reader fix, `src/modules/accounts/README.md`'s "Re-import"). Returns how many
+   * were deleted. */
+  deleteByIds(workspaceId: string, ids: string[]): Promise<number>;
   /** The sum of every `fee` line's `feeCents` for this clearing account within
    * `[monthStart, monthEnd]` (inclusive, both ISO `YYYY-MM-DD`) - the fee-invoice
    * reconciliation's own period sum (decisions/0026). `0` when there are none. */

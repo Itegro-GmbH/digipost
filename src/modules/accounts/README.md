@@ -18,7 +18,11 @@ Maintenance triggers:
   changes
 - `loadSettlementRows`'s Apple/Google re-detection, or either reader's own shape, changes
   (decisions/0048-app-store-reports.md)
-Last verified: 2026-10-22, decisions/0076-match-after-every-trigger.md: `importFromDocument`
+Last verified: 2026-11-12, "Google fee refunds" and "Re-import" below: a refunded Google fee is
+a fee line with a positive amount (`settlementFeeEffectCents`), and re-importing a settlement
+report replaces the lines it now yields differently (`TransactionRepository.deleteByIdempotencyKeys`,
+`SettlementLineRepository.deleteByIds`), with "Erneut importieren" on the report's document page.
+Previously 2026-10-22, decisions/0076-match-after-every-trigger.md: `importFromDocument`
 queues its `match-payments` run due now (`JobsRepository.scheduleNow`) instead of 90 seconds
 later, and `importFromDocumentAction` starts the runner in `after()`. Previously 2026-10-03,
 decisions/0068-supplier-clearing-accounts.md: a clearing account
@@ -180,6 +184,43 @@ point. `create-request-services.ts` wires `accounts` into that handler map along
 enqueues `@/modules/payments`'s `match-settlement-lines` job whenever it inserts at least one
 new settlement line (decisions/0026) - `AccountsUseCases` never calls into `PaymentsUseCases`
 directly, the same job-queue discipline.
+
+## Google fee refunds
+
+Corrected 2026-11 (amends decisions/0052, which stays as written): a Google Play "Google fee
+refund" row (the refunded share of Google's commission, +10,71 EUR for "Yearly (Planties)" in
+July 2026) is a `fee` line with the report's own positive sign in `fee_cents` and `net_cents`,
+and its clearing-account transaction credits the account. decisions/0052 had put it on the
+revenue side, which kept the account's balance right but overstated revenue and fees by the
+same amount in the ledger (July 2026: revenue 36,29 and fees 24,94 instead of 13,36 and 2,01;
+net 11,35 either way). A "Charge refund" stays a `refund` line, a "Tax" row stays on the revenue
+side with its own sign.
+
+`settlementFeeEffectCents` (`core/settlement-lines.ts`) decides a fee's sign: a fee next to its
+sale on the same row (Stripe, a positive magnitude) is always deducted; a row that is nothing
+but a fee (no gross, its net is the fee: Google's commission and its refund) moves the account
+by its own signed net. `src/modules/ledger`'s settlement template applies the same rule, so it
+books revenue as charges minus charge refunds and fees as fees minus fee refunds. Apple's
+report has no fee rows (its "Gewinn" is already net of Apple's commission), so it has no
+analogous case.
+
+Known, not changed here: `SettlementLineRepository.sumFeeCentsForAccountAndPeriod` (the
+fee-invoice reconciliation of decisions/0026) sums the raw `fee_cents`, which are negative for
+Google, so a Google fee invoice is never settled by it; refunds now reduce that sum correctly.
+
+## Re-import
+
+`importFromDocument` on a settlement report re-reads the stored bytes with the current reader
+and compares every stored line with what the report yields for the same `external_line_id`. A
+line the report no longer yields, or yields with other figures (type, gross, fee, net, date,
+payout id), is deleted together with its clearing-account transaction (and, by the foreign
+key, any `document_transactions` row on it), and the fresh draft is inserted in its place. A
+line that is still the same keeps its id, its transaction and its matches. A replaced line
+also enqueues `match-settlement-lines`, whose handler schedules the ledger's proposal sync,
+which updates the report's proposal while nobody has edited, booked or dismissed it. The
+button is "Erneut importieren" on the report's document page (for `finance.manage`) and on a
+bank account's import history; the MCP tool `import_statement` calls the same action. Tested
+against Postgres in `src/persistence/tests/settlement-reimport.db.test.ts`.
 
 ## Access
 
