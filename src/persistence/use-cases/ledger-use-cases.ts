@@ -18,11 +18,27 @@
 // go through read methods of `LedgerRepository` (read-only joins) or the owners' own
 // repositories; nothing here writes them.
 //
-// `upsertProposal` and `listSourceKeys` are the seam for the proposal engine (a later stage):
-// a proposal is keyed by its `sourceKey`, and a booked, dismissed or human-edited entry is never
-// overwritten by it.
+// The proposal engine (decisions/0080 phase 3): `syncProposals` reads every source through its
+// owner's read method into a snapshot, asks the AI booking advisor (with a per-document answer
+// cache) only about incoming documents no rule covers, lets the pure engine
+// (`@/modules/ledger`'s `buildProposals`) draft the entries and writes them through
+// `upsertProposal`, keyed by source: a booked, dismissed or human-edited entry is never
+// overwritten. Afterwards (and after every booking) `autoMatchOpenItems` matches the lines of an
+// open-item account that book and pay the same document and sum to zero; anything else is only
+// suggested (`suggestMatches`).
 import {
+  adviceQuestionsFor,
   BANK_ACCOUNT_NUMBERS,
+  bookingAdviceCacheKey,
+  buildProposals,
+  counterpartyPatternOf,
+  deriveRuleFromEntry,
+  findAutoMatches,
+  invoiceVatGroups,
+  platformDisplayName,
+  suggestMatchGroups,
+  toCacheableBookingAdvice,
+  validateBookingAdvice,
   bankLedgerAccountText,
   CONTACT_CLEARING_NUMBERS,
   contactLedgerAccountText,
@@ -49,6 +65,13 @@ import {
   vatPeriodsOfYear,
   yearPeriod,
   type AccountSheet,
+  type AdviceMap,
+  type BookingAdvice,
+  type BookingAdviceQuestion,
+  type LedgerBookingAdvisor,
+  type MatchSuggestion,
+  type ProposalSnapshot,
+  type SyncProposalsResult,
   type AdvisorComparison,
   type AdvisorUploadView,
   type BalanceList,
@@ -85,6 +108,9 @@ import {
   type UpdateAccountInput,
   type VatPreview,
 } from "@/modules/ledger";
+import { normalizeName } from "@/modules/contacts";
+import { resolveContactForCounterparty, type ContactAliasMap } from "@/modules/payments";
+import { JOB_KINDS } from "@/platform/jobs";
 import { dbErrorOf } from "@/persistence/foundation/db-errors";
 import type {
   CreateJournalLineRow,
@@ -127,6 +153,7 @@ export const LEDGER_ERROR = {
   lineAlreadyMatched: "line_already_matched",
   matchNotZero: "match_not_zero",
   advisorFileInvalid: "advisor_file_invalid",
+  ruleSourceMissing: "rule_source_missing",
 } as const satisfies Record<string, LedgerUseCaseErrorCode>;
 export type LedgerErrorCode = (typeof LEDGER_ERROR)[keyof typeof LEDGER_ERROR];
 
@@ -208,9 +235,37 @@ export interface LedgerUseCases {
   listAdvisorUploads(workspaceId: string): Promise<AdvisorUploadView[]>;
   getAdvisorComparison(workspaceId: string, uploadId: string): Promise<AdvisorComparisonView | null>;
   deleteAdvisorUpload(input: { workspaceId: string; uploadId: string }): Promise<void>;
+
+  // The proposal engine (decisions/0080 phase 3)
+  /** Proposes an entry for every source the templates, rules and the AI can explain, keyed by
+   * source, idempotent: a booked, edited or dismissed entry is never touched, an unchanged
+   * proposal is kept as it is. Then applies the safe automatic open-item matches. */
+  syncProposals(input: { workspaceId: string; from?: string; to?: string }): Promise<SyncProposalsResult>;
+  /** Enqueues one `ledger-sync` job for the workspace when the ledger is on (deduplicated: a
+   * burst of triggers leaves one queued run). `true` when the ledger is on. */
+  scheduleSync(workspaceId: string): Promise<boolean>;
+  /** The automatic matches: lines of an open-item account booking and paying the same
+   * document that sum to zero. Returns how many matches it created. */
+  autoMatchOpenItems(workspaceId: string): Promise<number>;
+  /** Candidate groups for the open items of one account (never applied by themselves). */
+  suggestMatches(workspaceId: string, accountId: string): Promise<MatchSuggestion[]>;
+  /** "Als Regel speichern": creates or updates the rule of the entry's contact or counterparty. */
+  learnRuleFromEntry(input: { workspaceId: string; entryId: string }): Promise<BookingRuleView>;
 }
 
-export type LedgerUseCaseDeps = { repos: Repositories; uow: UnitOfWork; now?: () => Date };
+export type LedgerUseCaseDeps = {
+  repos: Repositories;
+  uow: UnitOfWork;
+  now?: () => Date;
+  /** The AI that suggests an account for a document no rule covers. Without one, every such
+   * document gets the template default with the `ai_unavailable` warning. */
+  bookingAdvisor?: LedgerBookingAdvisor;
+  /** Most questions one sync asks the advisor; the rest wait for the next run. */
+  maxAdviceQuestionsPerSync?: number;
+};
+
+/** Enough for a month of incoming mail in one run, small enough to stay inside a job's budget. */
+export const MAX_ADVICE_QUESTIONS_PER_SYNC = 40;
 
 // ---------------------------------------------------------------------------------------------
 // Mapping helpers
@@ -272,6 +327,7 @@ function toLineView(row: JournalLineWithAccount): JournalLineView {
     taxCode: row.taxCode,
     taxRole: row.taxRole,
     generatedFromLinePosition: row.generatedFromLinePosition,
+    documentId: row.documentId,
     text: row.text,
   };
 }
@@ -306,7 +362,7 @@ function snapshotOf(entry: JournalEntryRow, lines: readonly JournalLineWithAccou
     dismissed: entry.dismissedAt !== null,
     documentId: entry.documentId,
     transactionId: entry.transactionId,
-    lines: lines.map((line) => ({ accountNumber: line.accountNumber, amountCents: line.amountCents, taxCode: line.taxCode, taxRole: line.taxRole, text: line.text })),
+    lines: lines.map((line) => ({ accountNumber: line.accountNumber, amountCents: line.amountCents, taxCode: line.taxCode, taxRole: line.taxRole, text: line.text, documentId: line.documentId })),
   };
 }
 
@@ -411,6 +467,7 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
         taxCode: line.taxCode,
         taxRole: line.taxRole,
         generatedFromLinePosition: line.generatedFromLinePosition,
+        documentId: line.documentId,
         text: line.text,
       };
     });
@@ -422,6 +479,9 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
     if (entry.documentId && !(await repos.ledger.documentExists(workspaceId, entry.documentId))) throw new UseCaseError(LEDGER_ERROR.sourceNotFound);
     if (entry.transactionId && !(await repos.ledger.transactionExists(workspaceId, entry.transactionId))) throw new UseCaseError(LEDGER_ERROR.sourceNotFound);
     if (entry.correctionOfEntryId && !(await repos.ledger.findEntry(workspaceId, entry.correctionOfEntryId))) throw new UseCaseError(LEDGER_ERROR.sourceNotFound);
+    for (const documentId of new Set(entry.lines.map((line) => line.documentId).filter((id): id is string => Boolean(id) && id !== entry.documentId))) {
+      if (!(await repos.ledger.documentExists(workspaceId, documentId))) throw new UseCaseError(LEDGER_ERROR.sourceNotFound);
+    }
     if (entry.filingId) {
       const filing = await repos.ledger.findFiling(workspaceId, entry.filingId);
       const covers =
@@ -485,6 +545,9 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
       if (!isBalanced(lines)) throw new UseCaseError(LEDGER_ERROR.unbalanced);
       await assertNotLocked(repos, workspaceId, entry.bookingDate, entry.filingId);
       await changeState(repos, { workspaceId, userId, entry, changeKind: "booked", reason: null, patch: { status: "booked", bookedAt: now(), bookedByUserId: userId } });
+      // A rule's proposal booked: one more hit for the rule (`originReason` is `rule:<id>`).
+      const ruleId = entry.origin === "rule" && entry.originReason?.startsWith("rule:") ? entry.originReason.slice("rule:".length) : null;
+      if (ruleId) await repos.ledger.incrementRuleHits(workspaceId, ruleId);
     });
   }
 
@@ -729,7 +792,150 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
     return new Map((await ledger.listAccounts(workspaceId)).map((account) => [account.id, account]));
   }
 
-  return {
+  // -------------------------------------------------------------------------------------------
+  // The proposal engine
+  // -------------------------------------------------------------------------------------------
+
+  /** Reads every source through its owner's read method (never writing any of them) and the
+   * ledger's own chart, rules and decided source keys into the engine's snapshot. */
+  async function loadSnapshot(workspaceId: string, settings: LedgerSettingsRow, period: { from?: string; to?: string }): Promise<ProposalSnapshot> {
+    const repos = deps.repos;
+    const [accounts, rules, documents, transactions, settlementLines, invoices, sourceAccounts, contacts, aliasRows, noDocumentRules, sourceKeys] = await Promise.all([
+      repos.ledger.listAccounts(workspaceId),
+      repos.ledger.listRules(workspaceId),
+      repos.document.listForLedger(workspaceId),
+      repos.transaction.listForLedger(workspaceId),
+      repos.settlementLine.listForLedger(workspaceId),
+      repos.invoice.listInvoices(workspaceId, 100_000),
+      repos.account.listForWorkspace(workspaceId),
+      repos.contact.listAllForWorkspace(workspaceId),
+      repos.paymentAlias.listForWorkspace(workspaceId),
+      repos.paymentNoDocumentRule.listForWorkspace(workspaceId),
+      repos.ledger.listSourceKeys(workspaceId),
+    ]);
+    const numbers = new Map(accounts.map((account) => [account.id, account.number]));
+    const aliases: ContactAliasMap = new Map(aliasRows.map((row) => [row.counterpartyNameNormalized, row.contactId]));
+    const noDocumentNames = new Set(noDocumentRules.map((rule) => rule.counterpartyNameNormalized));
+    const contactsForResolution = contacts.map((contact) => ({ id: contact.id, name: contact.name }));
+
+    return {
+      from: period.from,
+      to: period.to,
+      startDate: settings.startDate,
+      accounts: accounts.map((account) => ({
+        number: account.number,
+        name: account.name,
+        kind: account.kind,
+        group: account.group,
+        openItems: account.openItems,
+        ownerType: account.ownerType,
+        ownerBankAccountId: account.ownerBankAccountId,
+        ownerContactId: account.ownerContactId,
+        ownerPlatform: account.ownerPlatform,
+        ownerPersonName: account.ownerPersonName,
+        archived: account.archivedAt !== null,
+      })),
+      rules: rules
+        .filter((rule) => rule.active)
+        .map((rule) => ({
+          id: rule.id,
+          contactId: rule.contactId,
+          counterpartyPattern: rule.counterpartyPattern,
+          direction: rule.direction,
+          accountNumber: numbers.get(rule.accountId) ?? "",
+          taxCode: rule.taxCode,
+          paymentAccountNumber: rule.paymentAccountId ? (numbers.get(rule.paymentAccountId) ?? null) : null,
+          noDocument: rule.noDocument,
+        })),
+      documents: documents.map((doc) => ({ ...doc })),
+      transactions: transactions.map((tx) => ({
+        id: tx.id,
+        bankAccountId: tx.accountId,
+        bookingDate: tx.bookingDate,
+        amountCents: tx.amountCents,
+        counterpartyName: tx.counterpartyName,
+        counterpartyIban: tx.counterpartyIban,
+        remittanceText: tx.remittanceText,
+        resolvedContactId: resolveContactForCounterparty(tx.counterpartyName, contactsForResolution, aliases),
+        pairedClearing: tx.pairedClearing,
+        noDocumentNeeded: tx.noDocumentNeeded,
+        noDocumentRule: tx.counterpartyName !== null && noDocumentNames.has(normalizeName(tx.counterpartyName)),
+      })),
+      settlementLines: settlementLines.map((line) => ({
+        id: line.id,
+        documentId: line.sourceDocumentId,
+        platform: line.platform,
+        type: line.type,
+        grossCents: line.grossCents,
+        feeCents: line.feeCents,
+        netCents: line.netCents,
+        bookingDate: line.bookingDate,
+      })),
+      invoices: invoices.map((invoice) => ({
+        id: invoice.id,
+        number: invoice.number,
+        type: invoice.type,
+        issueDate: invoice.issueDate,
+        serviceDate: invoice.einvoiceInput.deliveryDate ?? invoice.einvoiceInput.periodEnd ?? null,
+        contactId: invoice.contactId,
+        buyerName: invoice.buyerName,
+        buyerCountry: invoice.einvoiceInput.buyer?.address?.country ?? null,
+        documentId: invoice.documentId,
+        groups: invoiceVatGroups(
+          (invoice.einvoiceInput.lines ?? []).map((line) => ({
+            quantity: line.quantity,
+            unitPrice: line.unitPrice,
+            category: line.vat.category,
+            ratePercent: Number(line.vat.rate ?? 0),
+          })),
+          { netCents: invoice.netCents, vatCents: invoice.vatCents },
+        ),
+      })),
+      ownBankAccounts: sourceAccounts.filter((account) => account.type === "bank").map((account) => ({ id: account.id, iban: account.iban })),
+      decidedSourceKeys: new Set(sourceKeys.filter((key) => key.status === "booked" || key.dismissedAt !== null || key.userEditedAt !== null).map((key) => key.sourceKey)),
+    };
+  }
+
+  /** Asks the advisor what the cache cannot answer, at most `maxAdviceQuestionsPerSync` per run.
+   * A thrown call (unavailable, not configured, rate limited) is not cached: the next run asks
+   * again. Every answer, cached or fresh, is validated against the question it answers. */
+  async function adviseAll(workspaceId: string, questions: readonly BookingAdviceQuestion[], result: SyncProposalsResult): Promise<AdviceMap> {
+    const advice = new Map<string, BookingAdvice | null>();
+    if (questions.length === 0) return advice;
+    const advisor = deps.bookingAdvisor;
+    if (!advisor) {
+      for (const question of questions) advice.set(question.documentId, null);
+      result.aiUnavailable += questions.length;
+      return advice;
+    }
+    const cached = new Map((await ledger.listBookingAdvice(workspaceId, questions.map((question) => question.documentId))).map((row) => [row.documentId, row]));
+    const budget = deps.maxAdviceQuestionsPerSync ?? MAX_ADVICE_QUESTIONS_PER_SYNC;
+    let asked = 0;
+    for (const question of questions) {
+      const key = bookingAdviceCacheKey(question, advisor.version);
+      const hit = cached.get(question.documentId);
+      if (hit && hit.cacheKey === key) {
+        result.aiCached++;
+        advice.set(question.documentId, validateBookingAdvice(hit.answer, question));
+        continue;
+      }
+      if (asked >= budget) continue; // deferred: no entry in the map
+      asked++;
+      try {
+        const raw = toCacheableBookingAdvice(await advisor.advise(question));
+        result.aiAsked++;
+        await ledger.upsertBookingAdvice({ workspaceId, documentId: question.documentId, cacheKey: key, answer: raw });
+        advice.set(question.documentId, validateBookingAdvice(raw, question));
+      } catch (err) {
+        console.error("[ledger] booking advisor failed", err instanceof Error ? err.name : "unknown");
+        result.aiUnavailable++;
+        advice.set(question.documentId, null);
+      }
+    }
+    return advice;
+  }
+
+  const api: LedgerUseCases = {
     // -----------------------------------------------------------------------------------------
     // Settings
     // -----------------------------------------------------------------------------------------
@@ -972,6 +1178,8 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
 
     async bookEntry({ workspaceId, userId, entryId }) {
       await bookOne(workspaceId, userId, entryId);
+      // The invoice and its payment may both be booked now: match them right away.
+      await api.autoMatchOpenItems(workspaceId);
     },
 
     async unbookEntry({ workspaceId, userId, entryId, reason }) {
@@ -997,6 +1205,7 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
           result.failed.push({ entryId, errorCode: err.code as LedgerErrorCode });
         }
       }
+      if (result.booked.length > 0) await api.autoMatchOpenItems(workspaceId);
       return result;
     },
 
@@ -1055,7 +1264,7 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
             origin: fields.origin,
             documentId: fields.documentId,
             transactionId: fields.transactionId,
-            lines: rows.map((line) => ({ accountNumber: numbers.get(line.accountId) ?? "", amountCents: line.amountCents, taxCode: line.taxCode, taxRole: line.taxRole, text: line.text })),
+            lines: rows.map((line) => ({ accountNumber: numbers.get(line.accountId) ?? "", amountCents: line.amountCents, taxCode: line.taxCode, taxRole: line.taxRole, text: line.text, documentId: line.documentId })),
           };
           const sameWarnings = JSON.stringify(existing.warnings) === JSON.stringify(fields.warnings) && existing.originReason === fields.originReason;
           if (sameSnapshot(before, after) && sameWarnings) return { entryId: existing.id, outcome: "kept" as const };
@@ -1362,5 +1571,125 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
       await requireEnabled(workspaceId);
       if (!(await ledger.deleteAdvisorUpload(workspaceId, uploadId))) throw new UseCaseError(LEDGER_ERROR.notFound);
     },
+    // -----------------------------------------------------------------------------------------
+    // The proposal engine
+    // -----------------------------------------------------------------------------------------
+    async syncProposals({ workspaceId, from, to }) {
+      const settings = await requireEnabled(workspaceId);
+      // New bank or clearing accounts get their ledger account first, so their sources can be
+      // proposed in the same run.
+      await transact(async (repos) => {
+        const workspace = await repos.workspace.lockForUpdate(workspaceId);
+        if (!workspace) throw new UseCaseError(LEDGER_ERROR.notFound);
+        await seedChart(repos, workspaceId);
+      });
+      const result: SyncProposalsResult = { created: 0, updated: 0, kept: 0, failed: 0, unproposed: 0, deferred: 0, aiAsked: 0, aiCached: 0, aiUnavailable: 0, autoMatched: 0 };
+      const snapshot = await loadSnapshot(workspaceId, settings, { from, to });
+      const advice = await adviseAll(workspaceId, adviceQuestionsFor(snapshot), result);
+      const plan = buildProposals(snapshot, advice, platformDisplayName);
+      result.unproposed = plan.unproposed.length;
+      result.deferred = plan.deferred.length;
+
+      for (const draft of plan.drafts) {
+        try {
+          const { outcome } = await api.upsertProposal({
+            workspaceId,
+            proposal: { sourceKey: draft.sourceKey, entry: draft.entry, origin: draft.origin, originReason: draft.originReason, warnings: draft.warnings },
+          });
+          result[outcome]++;
+        } catch (err) {
+          if (!(err instanceof UseCaseError)) throw err;
+          result.failed++;
+        }
+      }
+      result.autoMatched = await api.autoMatchOpenItems(workspaceId);
+      return result;
+    },
+
+    async scheduleSync(workspaceId) {
+      if (!(await api.isEnabled(workspaceId))) return false;
+      await deps.repos.jobs.scheduleNow({ kind: JOB_KINDS.ledgerSync, workspaceId, payload: { workspaceId }, now: now() });
+      return true;
+    },
+
+    async autoMatchOpenItems(workspaceId) {
+      await requireEnabled(workspaceId);
+      const matches = findAutoMatches(await ledger.listUnmatchedOpenItemLines(workspaceId));
+      let created = 0;
+      for (const match of matches) {
+        try {
+          await transact(async (repos) => {
+            // Re-checked inside the transaction: a concurrent run or a human may have matched
+            // one of the lines since the read.
+            if ((await repos.ledger.findMatchedLineIds(workspaceId, match.lineIds)).length > 0) return;
+            await repos.ledger.insertMatch({ workspaceId, accountId: match.accountId, kind: "match", note: null, createdByUserId: null }, match.lineIds);
+            created++;
+          });
+        } catch (err) {
+          if (err instanceof UseCaseError && err.code === LEDGER_ERROR.lineAlreadyMatched) continue;
+          throw err;
+        }
+      }
+      return created;
+    },
+
+    async suggestMatches(workspaceId, accountId) {
+      await requireEnabled(workspaceId);
+      const account = await ledger.findAccountById(workspaceId, accountId);
+      if (!account) throw new UseCaseError(LEDGER_ERROR.accountNotFound);
+      if (!account.openItems) throw new UseCaseError(LEDGER_ERROR.accountNotOpenItems);
+      return suggestMatchGroups(await ledger.listUnmatchedOpenItemLines(workspaceId, account.id));
+    },
+
+    async learnRuleFromEntry({ workspaceId, entryId }) {
+      await requireEnabled(workspaceId);
+      const entry = await ledger.findEntry(workspaceId, entryId);
+      if (!entry) throw new UseCaseError(LEDGER_ERROR.notFound);
+      const [lines, accounts] = await Promise.all([ledger.listLines(workspaceId, [entry.id]), accountsById(workspaceId)]);
+
+      let contactId: string | null = null;
+      let counterpartyName: string | null = null;
+      if (entry.documentId) {
+        const links = await deps.repos.documentContact.listForDocument(workspaceId, entry.documentId);
+        const revenue = lines.some((line) => accounts.get(line.accountId)?.kind === "revenue");
+        const role = revenue ? "recipient" : "sender";
+        contactId = links.find((link) => link.role === role)?.contactId ?? null;
+      } else if (entry.transactionId) {
+        const tx = await deps.repos.transaction.findById(workspaceId, entry.transactionId);
+        counterpartyName = tx?.counterpartyName ?? null;
+        if (counterpartyName) {
+          const [contacts, aliasRows] = await Promise.all([deps.repos.contact.listAllForWorkspace(workspaceId), deps.repos.paymentAlias.listForWorkspace(workspaceId)]);
+          contactId = resolveContactForCounterparty(
+            counterpartyName,
+            contacts.map((contact) => ({ id: contact.id, name: contact.name })),
+            new Map(aliasRows.map((row) => [row.counterpartyNameNormalized, row.contactId])),
+          );
+        }
+      }
+
+      const rule = deriveRuleFromEntry({
+        entryId: entry.id,
+        source: entry.documentId ? "document" : "transaction",
+        contactId,
+        counterpartyName,
+        lines: lines.flatMap((line) => {
+          const account = accounts.get(line.accountId);
+          if (!account) return [];
+          return [{ accountNumber: account.number, kind: account.kind, group: account.group, openItems: account.openItems, ownerType: account.ownerType, amountCents: line.amountCents, taxCode: line.taxCode, taxRole: line.taxRole }];
+        }),
+      });
+      if (!rule) throw new UseCaseError(LEDGER_ERROR.ruleSourceMissing);
+
+      // One rule per contact (or counterparty pattern) and kind: learning again replaces it.
+      const pattern = rule.counterpartyPattern ?? (rule.contactId ? null : counterpartyPatternOf(counterpartyName));
+      const existing = (await ledger.listRules(workspaceId)).find(
+        (candidate) =>
+          candidate.noDocument === rule.noDocument &&
+          (rule.contactId ? candidate.contactId === rule.contactId : candidate.contactId === null && candidate.counterpartyPattern === pattern) &&
+          (candidate.direction === rule.direction || candidate.direction === "any"),
+      );
+      return existing ? api.updateRule({ workspaceId, ruleId: existing.id, rule: { ...rule, direction: existing.direction } }) : api.createRule({ workspaceId, rule });
+    },
   };
+  return api;
 }

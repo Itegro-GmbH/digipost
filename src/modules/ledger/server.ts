@@ -11,6 +11,7 @@ export {
   getLedgerAdvisorComparisonProjection,
   getLedgerBalancesProjection,
   getLedgerControlsProjection,
+  getLedgerMatchSuggestionsProjection,
   getLedgerOpenItemsProjection,
   getLedgerPeriodOverviewProjection,
   getLedgerSettingsProjection,

@@ -34,12 +34,13 @@ import {
   ruleInputSchema,
   settingsInputSchema,
   submitFilingInputSchema,
+  syncProposalsInputSchema,
   updateAccountInputSchema,
   updateEntryInputSchema,
   updateRuleInputSchema,
   uploadAdvisorInputSchema,
 } from "./core/schemas";
-import type { AdvisorUploadView, BookingRuleView, FilingView, HandoverView, LedgerAccountView, LedgerSettingsView } from "./core/types";
+import type { AdvisorUploadView, BookingRuleView, FilingView, HandoverView, LedgerAccountView, LedgerSettingsView, SyncProposalsResult } from "./core/types";
 
 const LEDGER_PATH = "/dashboard/buchhaltung";
 
@@ -178,6 +179,19 @@ export async function deleteBookingRuleAction(input: unknown): Promise<LedgerAct
     await ledger().deleteRule({ workspaceId: access.workspace.id, ruleId });
     return undefined;
   });
+}
+
+// The proposal engine --------------------------------------------------------------------------
+
+/** "Vorschläge aktualisieren": proposes an entry for every source not booked yet (decisions/0080
+ * phase 3), optionally only for sources dated in `from`..`to`. Idempotent. */
+export async function syncLedgerProposalsAction(input: unknown): Promise<LedgerActionResult<SyncProposalsResult>> {
+  return run(syncProposalsInputSchema, input ?? {}, (period, access) => ledger().syncProposals({ workspaceId: access.workspace.id, ...period }));
+}
+
+/** "Als Regel speichern": the entry's contact or counterparty is proposed the same way next time. */
+export async function learnLedgerRuleFromEntryAction(input: unknown): Promise<LedgerActionResult<BookingRuleView>> {
+  return run(entryIdInputSchema, input, ({ entryId }, access) => ledger().learnRuleFromEntry({ workspaceId: access.workspace.id, entryId }));
 }
 
 // Filings and handovers ------------------------------------------------------------------------

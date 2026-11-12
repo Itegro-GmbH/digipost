@@ -16,6 +16,8 @@ const ledgerUseCases = {
   createMatch: vi.fn(),
   submitFiling: vi.fn(),
   uploadAdvisorBalances: vi.fn(),
+  syncProposals: vi.fn(),
+  learnRuleFromEntry: vi.fn(),
 };
 vi.mock("@/persistence/composition/request-services", () => ({ getRequestServices: () => ({ ledger: ledgerUseCases }) }));
 
@@ -28,7 +30,9 @@ import {
   bulkBookJournalEntriesAction,
   createJournalEntryAction,
   createOpenItemMatchAction,
+  learnLedgerRuleFromEntryAction,
   saveLedgerSettingsAction,
+  syncLedgerProposalsAction,
   submitFilingAction,
   uploadAdvisorBalancesAction,
 } from "../actions";
@@ -69,6 +73,8 @@ describe("ledger actions: the finance.manage gate", () => {
     ["createOpenItemMatchAction", () => createOpenItemMatchAction({ accountNumber: "1461", kind: "match", lineIds: [ENTRY_ID] })],
     ["submitFilingAction", () => submitFilingAction({ filingId: ENTRY_ID, submittedOn: "2026-10-10" })],
     ["uploadAdvisorBalancesAction", () => uploadAdvisorBalancesAction({ periodFrom: "2026-01-01", periodTo: "2026-09-30", csvText: "Konto;Saldo" })],
+    ["syncLedgerProposalsAction", () => syncLedgerProposalsAction({})],
+    ["learnLedgerRuleFromEntryAction", () => learnLedgerRuleFromEntryAction({ entryId: ENTRY_ID })],
   ])("%s: a member is forbidden and no use case runs", async (_name, call) => {
     vi.mocked(requirePermission).mockResolvedValue(FORBIDDEN);
     expect(await call()).toEqual({ status: "error", errorCode: "forbidden" });
@@ -115,5 +121,29 @@ describe("bookJournalEntryAction", () => {
     ledgerUseCases.bookEntry.mockRejectedValue(new UseCaseError("some_other_module_code"));
     expect(await bookJournalEntryAction({ entryId: ENTRY_ID })).toEqual({ status: "error", errorCode: "unknown" });
     consoleError.mockRestore();
+  });
+});
+
+describe("syncLedgerProposalsAction", () => {
+  it("syncs the caller's own workspace, optionally for a period", async () => {
+    vi.mocked(requirePermission).mockResolvedValue(OK_ACCESS);
+    ledgerUseCases.syncProposals.mockResolvedValue({ created: 2 });
+    expect(await syncLedgerProposalsAction({ from: "2026-07-01", to: "2026-07-31", workspaceId: "someone-else" })).toEqual({ status: "success", data: { created: 2 } });
+    expect(ledgerUseCases.syncProposals).toHaveBeenCalledWith({ workspaceId: "w1", from: "2026-07-01", to: "2026-07-31" });
+    expect(await syncLedgerProposalsAction(undefined)).toMatchObject({ status: "success" });
+  });
+
+  it("refuses a reversed period before checking the permission", async () => {
+    expect(await syncLedgerProposalsAction({ from: "2026-08-01", to: "2026-07-01" })).toEqual({ status: "error", errorCode: "invalid_input" });
+    expect(requirePermission).not.toHaveBeenCalled();
+  });
+});
+
+describe("learnLedgerRuleFromEntryAction", () => {
+  it("passes rule_source_missing through", async () => {
+    vi.mocked(requirePermission).mockResolvedValue(OK_ACCESS);
+    ledgerUseCases.learnRuleFromEntry.mockRejectedValue(new UseCaseError("rule_source_missing"));
+    expect(await learnLedgerRuleFromEntryAction({ entryId: ENTRY_ID })).toEqual({ status: "error", errorCode: "rule_source_missing" });
+    expect(ledgerUseCases.learnRuleFromEntry).toHaveBeenCalledWith({ workspaceId: "w1", entryId: ENTRY_ID });
   });
 });

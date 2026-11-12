@@ -43,7 +43,7 @@ import { createWorkspaceUseCases } from "@/persistence/use-cases/workspaces-use-
 import { getPaymentProvider } from "@/modules/billing/server";
 import { getInvoiceRenderer } from "@/modules/invoicing/server";
 import { createSmtpMailer } from "@/platform/mailer/server";
-import { getDocumentAnalyzer, getIntakeClassifier, getOcrEngine, getPaymentArbiter } from "@/platform/mistral/server";
+import { getDocumentAnalyzer, getIntakeClassifier, getLedgerBookingAdvisor, getOcrEngine, getPaymentArbiter } from "@/platform/mistral/server";
 import { getInboundEmailDomain, getInboundMailProvider } from "@/platform/inbound-mail/server";
 import { getObjectStorage } from "@/platform/object-storage/server";
 
@@ -104,22 +104,23 @@ export function createRequestServices() {
   // lazy-singleton shape as `getObjectStorage()`.
   const invoices = createInvoiceUseCases({ repos, uow, objectStorage, renderer: getInvoiceRenderer(), documents });
 
+  // decisions/0080-ledger-double-entry-bookkeeping.md: the ledger writes only its own tables and
+  // reads the sources (bank accounts, transactions, settlement lines, documents, contacts,
+  // invoices) through their owners' read methods. Phase 3's proposal engine gets the AI booking
+  // advisor, bound by env exactly like the payment arbiter (`getLedgerBookingAdvisor()`: the
+  // real Mistral adapter, the deterministic fake, or "not configured").
+  const ledger = createLedgerUseCases({ repos, uow, bookingAdvisor: getLedgerBookingAdvisor() });
+
   // "Handlers registered where they belong" (decisions/0016-processing-pipeline-and-ai.md):
   // `src/platform/jobs`'s generic runner never sees `documents`/`billing`/`workspaces`/
   // `accounts`/`payments`/`mailer` directly, only this kind -> handler map, built once here
   // from the use cases this same function already constructed.
-  const jobHandlers = createJobHandlers({ documents, billing, workspaces, accounts, payments, mailIntake, mailer, objectStorage });
+  const jobHandlers = createJobHandlers({ documents, billing, workspaces, accounts, payments, mailIntake, ledger, mailer, objectStorage });
 
   // decisions/0066-abschluss-check-and-export.md: the Abschluss owns no table and needs no
   // port - only period-scoped reads over repositories other owners already own, so it gets
   // the plainest wiring of all (`{ repos }`, no `uow`: it never writes).
   const closing = createClosingUseCases({ repos });
-
-  // decisions/0080-ledger-double-entry-bookkeeping.md: the ledger writes only its own tables and
-  // reads the sources (bank accounts, transactions, documents, contacts) through read methods,
-  // so the plain `{ repos, uow }` wiring is all it needs. The proposal engine (a later stage)
-  // will get its ports here.
-  const ledger = createLedgerUseCases({ repos, uow });
 
   return {
     system: createSystemUseCases({ repos }),

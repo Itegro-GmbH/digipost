@@ -17,6 +17,7 @@ import type {
   JournalEntryView,
   LedgerAccountView,
   LedgerSettingsView,
+  MatchSuggestion,
   OpenItemAccountSummary,
   PeriodOverviewRow,
 } from "../core/types";
@@ -95,4 +96,10 @@ export const listLedgerAdvisorUploadsProjection = cache(async (workspaceId: stri
 
 export const getLedgerAdvisorComparisonProjection = cache(async (workspaceId: string, uploadId: string): Promise<AdvisorComparisonView | null> => {
   return getRequestServices().ledger.getAdvisorComparison(workspaceId, uploadId);
+});
+
+/** Candidate groups for the open items of one account (decisions/0080 phase 4, never applied by
+ * themselves). `accountId` is looked up within the caller's workspace only. */
+export const getLedgerMatchSuggestionsProjection = cache(async (workspaceId: string, accountId: string): Promise<MatchSuggestion[]> => {
+  return getRequestServices().ledger.suggestMatches(workspaceId, accountId);
 });
