@@ -14,7 +14,13 @@ Maintenance triggers:
 - A tax code, its USt-VA mapping, or the seed chart changes
 - A new write path touches a ledger table, or a control is added
 - The proposal engine or the UI stage lands (decisions/0080 phases)
-Last verified: 2026-11-12, decisions/0080-ledger-double-entry-bookkeeping.md UI stage, part 1: the
+Last verified: 2026-11-12, decisions/0080-ledger-double-entry-bookkeeping.md UI stage, part 2: the
+pages `/konten` (living Summen- und Saldenliste), `/konten/[nummer]` (Kontenblatt, "Offene
+Posten"), `/auswertungen/ust`, `/auswertungen/abgleich`, `/auswertungen/zeitraeume`,
+`/einstellungen` (Allgemein, Kontenplan, Regeln), the document page's "Buchhaltung" card, the
+finance page's discovery link, `core/balance-view.ts`, `core/document-status.ts`, and the use
+cases `getAccountSheet` (with proposals), `getAccountSheets`, `getBankComparisons` and the
+`documentId` filter of `listEntries`. Previously 2026-11-12, UI stage, part 1: the
 pages `/dashboard/buchhaltung` (overview, "Buchhaltung aktivieren"), `/zu-pruefen` (the review
 queue), `/buchung/[id]` and `/buchung/neu` (the booking editor) and `/journal`, the components in
 `ui/` and `client.ts`, `core/search-params.ts`, `core/periods.ts`, and the use cases
@@ -90,8 +96,15 @@ overwrites a booked, dismissed or human-edited entry.
   and the journal (`?von=&bis=&status=&herkunft=&konto=&seit=&anzahl=`), an empty or malformed
   value counting as absent (decisions/0062), and the journal's use-case filter and search string.
 - `core/periods.ts`: `describePeriod` (month, quarter, year or range, for the labels),
-  `lockingFilingFor` (the submitted filing covering a date) and `firstOpenDate` (where "Korrektur
-  buchen" dates its entry).
+  `lockingFilingFor` (the submitted filing covering a date), `firstOpenDate` (where "Korrektur
+  buchen" dates its entry) and `startedVatPeriods` (the period selects).
+- `core/balance-view.ts`: `buildBalanceGroups` (the accounts page's groups with subtotals, the
+  "Einfach" amounts in the account's own direction, accounts without movement on request),
+  `isCreditNormal`, the chip shape `AccountStatusChip`, and `openItemAccountType` (which
+  explanation an open-item account gets: prepaid or charged first, receivable, shareholder,
+  payable).
+- `core/document-status.ts`: `ledgerDocumentStatusOf`, the document card's state (gesperrt,
+  gebucht, Vorschlag, keine Buchung) and its entries, strongest first.
 - `ui/`: the page components (see "UI").
 
 ## Public interfaces
@@ -107,7 +120,12 @@ overwrites a booked, dismissed or human-edited entry.
   `getLedgerVatPreviewProjection`, `getLedgerControlsProjection`,
   `getLedgerPeriodOverviewProjection`, `listLedgerRulesProjection`, `listLedgerFilingsProjection`,
   `listLedgerHandoversProjection`, `listLedgerAdvisorUploadsProjection`,
-  `getLedgerAdvisorComparisonProjection`, `getLedgerMatchSuggestionsProjection`. A page checks `finance.read` and
+  `getLedgerAdvisorComparisonProjection`, `getLedgerMatchSuggestionsProjection`,
+  `getLedgerAccountSheetsProjection` (booked-only sheets of several accounts in one read),
+  `getLedgerBankComparisonsProjection` (per bank account: matches the statement, or since when not),
+  `getLedgerDocumentStatusProjection` (the document page's card: `null` while the ledger is off,
+  so another owner's page can call it without checking the flag; the caller checks
+  `finance.read`). A page checks `finance.read` and
   `isLedgerEnabledProjection` first; every other projection throws `disabled` while the ledger is
   off.
 - `actions.ts`: `saveLedgerSettingsAction`, `syncLedgerChartAction`,
@@ -126,7 +144,11 @@ overwrites a booked, dismissed or human-edited entry.
 - `client.ts`: `AccountTag`, `EntryEditor` (with `EditorEntry`, `EditorSeed`), `EntryLinesTable`,
   `JournalFilters`, `JournalTable`, `LedgerEnableCard`, `PeriodName`, `OriginPill`,
   `PeriodStatusPill`, `StatusPill`, `ReviewQueueClient` (with `QueueProblem`), `RevisionHistory`,
-  `SourcePanel`, `SyncProposalsButton`.
+  `SourcePanel`, `SyncProposalsButton`; part 2: `BalanceListView`, `AccountStatusBadge`,
+  `AccountSheetTable`, `OpenItemsClient`, `VatPreviewView`, `AdvisorUploadForm`,
+  `AdvisorUploadsList`, `AdvisorComparisonTable`, `PeriodsClient`, `FilingConfirmCard`,
+  `SettingsGeneralForm`, `ChartSettings`, `RulesSettings`, `RuleForm`, `DocumentLedgerCard`,
+  `LedgerTabs`, `ReportsTabs`, `SettingsTabs`, `PeriodSelect`.
 - The use cases `countWaitingProposals` (proposals not dismissed, any date) and `getSources`
   (the requested documents and bank transactions through `DocumentRepository.listForLedger` and
   `TransactionRepository.listForLedger`, extracted fields only; an id that is not found is left
@@ -216,11 +238,68 @@ under the shell's wide layout (`src/modules/dashboard-shell`'s `WIDE_LAYOUT_PREF
   locked entries with a lock (`lockingFilingFor`), the main Soll and Haben account, filters in the
   URL including "Geändert seit Übergabe" once a handover exists, 200 rows at a time with "Mehr laden".
 
-Not built yet (the UI's second part): the account pages (`/konten`, the Kontenblatt, open-item
-matching), the reports (`/auswertungen`: Summen und Salden with the tax advisor's comparison, the
-USt-VA preview, periods and filings), the settings (chart and rules), and the document page's
-"Buchhaltung" card. The overview and the editor already link to `/dashboard/buchhaltung/konten`,
-`/auswertungen/ust`, `/auswertungen/abgleich` and `/auswertungen/zeitraeume`.
+- `/dashboard/buchhaltung/konten` (`BalanceListView`): the living Summen- und Saldenliste of the
+  period (`?von=&bis=`, default the current year), one collapsible group per account group in
+  chart order ("Bank und Geld" first) with its subtotal. `?ansicht=einfach` (default) shows Rein,
+  Raus and Stand in the account's own direction (share capital and revenue read positive; a mixed
+  group such as "Steuern" has no added-up Stand); `?ansicht=soll-haben` shows EB, Soll, Haben and
+  Saldo with S or H, as DATEV does. `?alle=1` adds the accounts without movement. Chips: a bank
+  account "Stimmt mit Kontoauszug" or "Abweichung seit <Datum>" (`getBankComparisons` up to the
+  period's end), an open-item account "Ausgeglichen", "Erklärt" or "n offene Posten". Every
+  amount links to the Kontenblatt of the same period; a "?" disclosure shows the account's
+  description; the footer checks "Summe Soll = Summe Haben".
+- `/dashboard/buchhaltung/konten/[nummer]` (`AccountSheetTable`): header with both names,
+  description and balance, the opening balance, each line with date, text (link to the entry),
+  counter accounts (each a link to its sheet), document link, Soll, Haben and running Saldo.
+  Proposals are dashed with a "Vorschlag" pill and stay out of the balance unless "Vorschläge
+  einrechnen" (`?vorschlaege=1`). An open-item account has the tab `?tab=offen`
+  (`OpenItemsClient`): what this kind of account is for, the automatic suggestions as cards
+  ("Diese n Posten gleichen sich aus", "Übernehmen"), the open lines with checkboxes, a sticky
+  bar with the selection's live sum, "Ausgleichen" enabled only at exactly 0,00, "Rest erklären"
+  with a required note (a prepaid credit, a payout still to come), and the existing matches in a
+  disclosure, each with "Ausgleich aufheben".
+- `/dashboard/buchhaltung/auswertungen` redirects to `/ust`. Tabs (`ReportsTabs`): "Summen und
+  Salden" is the accounts page in its Soll/Haben view (one list, not two that could disagree),
+  "USt-VA", "Abgleich Steuerberaterin", "Zeiträume und Meldungen".
+- `/auswertungen/ust` (`VatPreviewView`): one started USt-VA period (`?zeitraum=2026-07` or
+  `2026-Q3`, default the newest), each Kennzahl with number, plain label, base and tax, opening to
+  the booked entries behind it (`vatKennzahlenOfEntry`, the same rules the preview sums by), then
+  Zahllast or Erstattung. It states the taxation basis; with Ist configured it says plainly that
+  the preview still books on the booking date. Proposals in the period are named as not included.
+- `/auswertungen/abgleich` (`AdvisorUploadForm`, `AdvisorUploadsList`, `AdvisorComparisonTable`):
+  upload the tax advisor's DATEV CSV for a period (read as UTF-8, else Windows-1252), the uploads
+  (`?upload=`, default the newest; delete after a confirm), and per account Digipost, her figure
+  and the difference, `?nur=abweichungen` for differences only. A differing account opens to
+  Digipost's own lines of the period (`getAccountSheets`, up to 60 accounts) and its Kontenblatt.
+  Only account totals are compared, and the page says so.
+- `/auswertungen/zeitraeume` (`PeriodsClient`): the year's started USt-VA periods (`?jahr=`) with
+  status, booked and proposed counts, the newest handover and "n Änderungen seit der Übergabe"
+  (link to the journal filtered by that handover), "An Steuerberaterin übergeben" (a note, never a
+  lock). "Als eingereicht markieren" opens `FilingConfirmCard`: Eingereicht am, the Zahllast or
+  Erstattung on the protocol (optional; a warning when it differs from the preview, never a
+  block), how many booked entries get locked, proposals that will not be bookable any more, and
+  the checkbox "Ich habe die Meldung beim Finanzamt abgegeben"; it creates the draft filing
+  (unless one waits) and submits it. A submitted period shows the lock and "Berichtigte Meldung
+  anlegen", which explains both paths (a correcting filing whose entries may be dated in the
+  period, or "Korrektur buchen" in the next open period) and leaves the choice to the tax
+  advisor. A correcting draft is submitted the same way. The year's annual statement is the last
+  row (no Zahllast; it locks the whole year).
+- `/dashboard/buchhaltung/einstellungen` (`SettingsTabs`): Allgemein (`SettingsGeneralForm`: start
+  date, USt-VA period, basis, "Kontenplan aktualisieren", "Buchhaltung ausschalten" behind an
+  inline confirm; nothing is deleted), `/kontenplan` (`ChartSettings`: grouped chart with kind,
+  open items, owner and archived state; a new account with open items and an owner, bank account,
+  contact, platform or person, whose type presets kind and group; edit name, description, group
+  and open items; archive and restore; the owner options come from `listAccountsOverviewProjection`
+  and `listContactSummariesProjection`), `/regeln` (`RulesSettings`, `RuleForm`: contact or
+  pattern, direction, account, tax code, payment account, "ohne Beleg", hits, active; create,
+  edit, deactivate, delete after an inline confirm).
+- Outside the ledger's routes: the document page (`/dashboard/documents/[id]`) shows
+  `DocumentLedgerCard` for `finance.read` while the ledger is on: Vorschlag, gebucht, gesperrt or
+  keine Buchung, the entry's deterministic sentence and a link, or "Buchung anlegen"
+  (`/buchung/neu?beleg=`, `finance.manage` only). `/dashboard/abschluss` links "Zur
+  Buchhaltung" while the ledger is on. While it is off, `/dashboard/finance` shows one dashed link
+  "Buchhaltung (intern)" to `finance.manage`: the least intrusive place an admin already visits
+  for money matters, so the off-by-default ledger can be found without a nav entry.
 
 ## Proposal engine
 
@@ -308,7 +387,10 @@ unbooked checks start at the ledger's start date.
 ## Known gaps
 
 - The USt-VA preview books on the booking date; Ist-Versteuerung (`vat_basis = ist`) is stored
-  but not applied yet.
+  but not applied yet (the USt-VA page and the settings say so).
+- The comparison with the tax advisor uses her account totals only; it cannot show which of her
+  bookings differ.
+- The rule and chart forms list up to 1000 contacts.
 - Bases are reported in cents; the form rounds them to whole euros.
 - A proposal whose source disappears or no longer qualifies (a deleted document, a removed
   match) is left as it is; the engine never deletes proposals.
@@ -354,4 +436,16 @@ and income; recognizing existing lines; mode switching; the correction's reverse
 `tests/journal-filters.test.tsx` (Testing Library + jsdom, the actions mocked),
 `tests/search-params.test.ts`, `tests/periods.test.ts`, `tests/revision-diff.test.ts`, and
 `tests/ui-messages-i18n.test.ts` (every literal message key in `ui/` and the pages resolves, and
-every value set the UI shows).
+every value set the UI shows, and no em or en dash in `Ledger.*`). UI part 2:
+`tests/balance-view.test.ts` (grouping, signs, mixed groups, empty accounts, open-item account
+types), `tests/ui2-core.test.ts` (the account sheet with proposals, `vatKennzahlenOfEntry`, the
+document status, the accounts URL parameters, `startedVatPeriods`), and Testing Library tests
+`tests/balance-list.test.tsx` (groups, both views, chips, links, Soll = Haben),
+`tests/open-items-client.test.tsx` (Ausgleichen only at zero, a note to explain, a suggestion
+applied, undo, read-only), `tests/periods-client.test.tsx` (the checkbox, the lock count, the
+Zahllast warning, draft then submit, the correction guide, the handover),
+`tests/advisor-comparison.test.tsx`, `tests/rules-settings.test.tsx` and
+`tests/document-ledger-card.test.tsx`; `src/persistence/tests/ledger-use-cases.db.test.ts` covers
+the new reads. End to end: `tests/e2e/ledger.spec.ts` (from the finance page's link through
+enabling, booking the share capital, the journal, Konten 2900 in both views, its Kontenblatt,
+the reports and settings pages; a member gets 404 on every ledger route and no nav entry).

@@ -15,7 +15,9 @@ Maintenance triggers:
 - The lock rule (what a filing freezes) changes
 - The existing clearing accounts (decisions/0026, decisions/0068) are migrated onto the ledger
 - The export format to the tax advisor is decided
-Last verified: 2026-11-12, phase 3 implemented (the proposal engine with rules and the AI
+Last verified: 2026-11-12, phases 1 to 6 implemented including the UI (status updated), against
+`src/app/(app)/dashboard/buchhaltung/**`, `src/modules/ledger/ui/` and
+`src/modules/ledger/README.md`'s "UI". Previously 2026-11-12, phase 3 implemented (the proposal engine with rules and the AI
 advisor, plus the automatic matches of phase 4), against `src/modules/ledger/core/proposals.ts`,
 `src/persistence/use-cases/ledger-use-cases.ts` and migration `0032_icy_medusa.sql`. Previously
 2026-11-12, phase 2 implemented (tax fields on `documents`,
@@ -31,15 +33,21 @@ reconciliation of the tax advisor's evaluations for June to September 2026
 
 ## Status
 
-Accepted, being implemented (stage 1: core; phases 2 and 3 implemented). Stage 1 is the ledger core in `src/modules/ledger`
+Accepted, being implemented: phases 1 to 6 are implemented, phase 7 (the export to the tax
+advisor) is pending. Stage 1 is the ledger core in `src/modules/ledger`
 and `src/persistence/use-cases/ledger-use-cases.ts`: the tables below, the SKR 04 seed, tax codes
 and their expansion, entries with revisions, booking, open-item matches, booking rules, filings
 and the lock, handovers, the tax advisor's balance lists, every report and control, and the
 Server Actions. Phase 2 (the new extraction fields) is implemented: see "Documents need more
 extracted fields" below. Phase 3 (proposals from documents, bank transactions, settlement reports
 and outgoing invoices, with rules and the AI) is implemented, together with phase 4's automatic
-and suggested open-item matches: see "Proposals as implemented (phase 3)" below. Not yet: moving
-the existing clearing accounts onto the ledger (the rest of phase 4) and every page. Builds on decisions/0024-accounts-and-transactions.md,
+and suggested open-item matches: see "Proposals as implemented (phase 3)" below. The UI for every
+phase is implemented under `/dashboard/buchhaltung` (overview, review queue, editor, journal,
+accounts with Kontenblatt and open-item matching, USt-VA preview, the comparison with the tax
+advisor, periods with handover, filing and correction, settings for the chart and the rules;
+`src/modules/ledger/README.md`, "UI"). Still open within phase 4: the existing clearing accounts
+(decisions/0026, decisions/0068) are not migrated; both representations coexist (see
+"Consequences"). Builds on decisions/0024-accounts-and-transactions.md,
 decisions/0026-platform-settlements.md, decisions/0068-supplier-clearing-accounts.md,
 decisions/0066-abschluss-check-and-export.md and decisions/0079-outgoing-invoices.md.
 

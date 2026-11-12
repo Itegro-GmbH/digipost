@@ -15,8 +15,9 @@ Maintenance triggers:
 - The workspace switcher's list, ordering, or entries change
 - A nav entry needs to be hidden from members who lack a permission
 - A nav entry depends on a per-workspace feature, shows a count, or a page needs the wide layout
-Last verified: 2026-11-12, decisions/0080-ledger-double-entry-bookkeeping.md: the "Buchhaltung"
-section (Übersicht, Zu prüfen, Journal), the first entries gated by a per-workspace `feature`
+Last verified: 2026-11-12, decisions/0080-ledger-double-entry-bookkeeping.md UI part 2: the
+"Buchhaltung" section gained Konten, Auswertungen and Einstellungen (same gate). Previously
+2026-11-12, decisions/0080: the "Buchhaltung" section (Übersicht, Zu prüfen, Journal), the first entries gated by a per-workspace `feature`
 (`ledger`) as well as a permission; the "Zu prüfen" count badge; `core/layout.ts`'s wide-layout
 opt-out for `/dashboard/buchhaltung/**`. Previously 2026-10-22, decisions/0075-email-intake.md: "E-Mail-Eingang" is a real link to
 `/dashboard/email-intake`. Previously 2026-10-03, decisions/0070-several-workspaces-per-user.md: the sidebar's and
@@ -97,8 +98,10 @@ entry point.
   field (`NAV_FEATURES`, today only `ledger`) hides an entry unless the layout reports that
   per-workspace feature as on (`visibleNavSections(permissions, sections, features)`); the
   "Buchhaltung" section (decisions/0080-ledger-double-entry-bookkeeping.md: `/dashboard/buchhaltung`
-  "Übersicht", `/dashboard/buchhaltung/zu-pruefen` "Zu prüfen", `/dashboard/buchhaltung/journal`
-  "Journal") needs both `finance.read` and `feature: "ledger"`, so an admin of a workspace that
+  "Übersicht", `/dashboard/buchhaltung/zu-pruefen` "Zu prüfen", `/dashboard/buchhaltung/konten`
+  "Konten", `/dashboard/buchhaltung/journal` "Journal", `/dashboard/buchhaltung/auswertungen`
+  "Auswertungen", `/dashboard/buchhaltung/einstellungen` "Einstellungen"; the longest-prefix rule
+  marks an account sheet as "Konten" and every report or settings tab as its entry) needs both `finance.read` and `feature: "ledger"`, so an admin of a workspace that
   never enabled the ledger sees no such section. The optional `badge` field (`NAV_BADGES`) names
   a count the layout supplies (`ledgerProposals`, the proposals waiting for review); zero shows
   nothing, and the number has a screen-reader text (`DashboardShell.nav.badge`).
