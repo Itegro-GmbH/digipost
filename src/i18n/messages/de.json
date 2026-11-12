@@ -1808,5 +1808,240 @@
       "forbidden": "Dafür fehlt Ihnen die Berechtigung.",
       "unknown": "Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut."
     }
+  },
+  "Ledger": {
+    "errors": {
+      "invalid_input": "Die Eingaben sind unvollständig oder ungültig.",
+      "disabled": "Die Buchhaltung ist für diesen Arbeitsbereich nicht aktiviert.",
+      "not_found": "Dieser Eintrag existiert nicht (mehr).",
+      "account_not_found": "Dieses Konto gibt es in Ihrem Kontenplan nicht.",
+      "account_archived": "Dieses Konto ist archiviert. Bitte wählen Sie ein anderes Konto.",
+      "account_number_taken": "Diese Kontonummer ist bereits vergeben.",
+      "owner_not_found": "Das zugeordnete Bankkonto oder der Kontakt wurde nicht gefunden.",
+      "owner_taken": "Für dieses Bankkonto, diesen Kontakt oder diese Plattform gibt es bereits ein Konto.",
+      "source_not_found": "Der verknüpfte Beleg, Bankumsatz oder die korrigierte Buchung wurde nicht gefunden.",
+      "unbalanced": "Soll und Haben sind nicht gleich. Bitte verteilen Sie die Differenz, bevor Sie buchen.",
+      "locked": "Dieser Zeitraum ist durch eine eingereichte Meldung gesperrt. Buchen Sie eine Korrektur in einem offenen Zeitraum oder legen Sie eine berichtigte Meldung an.",
+      "reason_required": "Bitte geben Sie an, warum Sie eine gebuchte Buchung ändern.",
+      "stale_revision": "Die Buchung wurde inzwischen geändert. Bitte laden Sie die Seite neu.",
+      "already_booked": "Diese Buchung ist bereits gebucht.",
+      "not_booked": "Diese Buchung ist nicht gebucht.",
+      "not_proposed": "Das ist nur bei einem offenen Vorschlag möglich.",
+      "invalid_filing": "Die gewählte Meldung ist keine offene berichtigte Meldung für dieses Datum.",
+      "filing_overlaps": "Für diesen Zeitraum gibt es bereits eine Meldung.",
+      "filing_not_draft": "Diese Meldung ist bereits eingereicht.",
+      "filing_not_submitted": "Nur eine eingereichte Meldung kann berichtigt werden.",
+      "correction_exists": "Für diese Meldung gibt es bereits eine offene Berichtigung.",
+      "account_not_open_items": "Dieses Konto führt keine offenen Posten.",
+      "line_not_on_account": "Mindestens ein Posten gehört nicht zu diesem Konto oder ist noch nicht gebucht.",
+      "line_already_matched": "Mindestens ein Posten ist bereits ausgeglichen.",
+      "match_not_zero": "Die ausgewählten Posten ergeben nicht null. Wählen Sie weitere Posten oder erklären Sie den Rest.",
+      "advisor_file_invalid": "Die Datei konnte nicht gelesen werden. Bitte laden Sie die Summen- und Saldenliste als CSV-Datei aus DATEV hoch.",
+      "unauthenticated": "Bitte melden Sie sich erneut an.",
+      "no_workspace": "Sie gehören zu keinem Arbeitsbereich.",
+      "forbidden": "Dafür fehlt Ihnen die Berechtigung.",
+      "unknown": "Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut."
+    },
+    "taxCodes": {
+      "vst19": {
+        "label": "Vorsteuer 19 %",
+        "hint": "Rechnung eines deutschen Anbieters mit 19 % Umsatzsteuer. Die Steuer erstattet Ihnen das Finanzamt."
+      },
+      "vst7": {
+        "label": "Vorsteuer 7 %",
+        "hint": "Rechnung mit dem ermäßigten Satz von 7 %, zum Beispiel für Bücher oder Lebensmittel. Die Steuer erstattet Ihnen das Finanzamt."
+      },
+      "rc13b": {
+        "label": "Reverse Charge (§ 13b UStG)",
+        "hint": "Rechnung eines ausländischen Anbieters ohne deutsche Umsatzsteuer, zum Beispiel von Meta, Google oder Apple. Sie schulden die Steuer selbst und ziehen sie im selben Zug als Vorsteuer wieder ab. Sie zahlen dadurch nichts, aber beides steht in der Umsatzsteuer-Voranmeldung."
+      },
+      "ust19": {
+        "label": "Umsatzsteuer 19 %",
+        "hint": "Ihre eigene Rechnung an einen Kunden in Deutschland mit 19 % Umsatzsteuer, die Sie an das Finanzamt abführen."
+      },
+      "ust7": {
+        "label": "Umsatzsteuer 7 %",
+        "hint": "Ihre eigene Rechnung mit dem ermäßigten Satz von 7 %, den Sie an das Finanzamt abführen."
+      },
+      "eu_not_taxable": {
+        "label": "Leistung an EU-Unternehmen (nicht steuerbar)",
+        "hint": "Ihre Rechnung an ein Unternehmen in einem anderen EU-Land. Der Kunde versteuert sie dort. Sie melden nur den Betrag in Kennzahl 21."
+      },
+      "not_taxable": {
+        "label": "Nicht steuerbar",
+        "hint": "Ohne Umsatzsteuer und ohne Vorsteuer, zum Beispiel Gebühren einer Behörde, Gerichtskosten oder Stammkapital."
+      },
+      "tax_free": {
+        "label": "Steuerfrei",
+        "hint": "Eine steuerfreie Leistung, zum Beispiel eine Versicherung oder Zinsen. Es gibt keine Vorsteuer."
+      },
+      "pass_through": {
+        "label": "Durchlaufender Posten",
+        "hint": "Geld, das Sie nur im Namen eines anderen weitergeben, zum Beispiel Gerichtskosten auf einer Notarrechnung. Ohne Umsatzsteuer und ohne Vorsteuer."
+      }
+    },
+    "kennzahlen": {
+      "81": "Steuerpflichtige Umsätze zu 19 %",
+      "86": "Steuerpflichtige Umsätze zu 7 %",
+      "21": "Nicht steuerbare sonstige Leistungen an Unternehmen in der EU",
+      "46": "Leistungen ausländischer Unternehmer nach § 13b UStG",
+      "47": "Umsatzsteuer auf Leistungen nach § 13b UStG",
+      "66": "Vorsteuer aus Rechnungen anderer Unternehmer",
+      "67": "Vorsteuer aus Leistungen nach § 13b UStG",
+      "83": "Zahllast oder Erstattung"
+    },
+    "accountKinds": {
+      "asset": "Vermögen",
+      "liability": "Schulden",
+      "equity": "Eigenkapital",
+      "revenue": "Erlöse",
+      "expense": "Kosten"
+    },
+    "groups": {
+      "bank": "Bank und Geld",
+      "open_items": "Offene Posten",
+      "costs": "Kosten",
+      "revenue": "Einnahmen",
+      "taxes": "Steuern",
+      "equity": "Eigenkapital",
+      "other": "Sonstiges"
+    },
+    "ownerTypes": {
+      "bank_account": "Bankkonto",
+      "contact": "Kontakt",
+      "platform": "Plattform",
+      "person": "Person"
+    },
+    "statuses": {
+      "proposed": "Vorschlag",
+      "booked": "Gebucht",
+      "dismissed": "Verworfen"
+    },
+    "origins": {
+      "template": "Vorlage",
+      "rule": "Regel",
+      "ai": "KI",
+      "manual": "Manuell"
+    },
+    "taxRoles": {
+      "base": "Betrag",
+      "tax": "Steuer"
+    },
+    "amountModes": {
+      "gross": "Brutto",
+      "net": "Netto"
+    },
+    "revisionKinds": {
+      "created": "Angelegt",
+      "edited": "Geändert",
+      "booked": "Gebucht",
+      "unbooked": "Buchung aufgehoben",
+      "dismissed": "Verworfen",
+      "restored": "Wiederhergestellt",
+      "deleted": "Gelöscht"
+    },
+    "matchKinds": {
+      "match": "Ausgeglichen",
+      "explained": "Rest erklärt"
+    },
+    "openItemStatuses": {
+      "zero": "Steht auf null",
+      "explained": "Erklärt",
+      "open": "Offen"
+    },
+    "ruleDirections": {
+      "incoming": "Eingang",
+      "outgoing": "Ausgang",
+      "any": "Eingang und Ausgang"
+    },
+    "filingKinds": {
+      "vat_return": "Umsatzsteuer-Voranmeldung",
+      "annual_statement": "Jahresabschluss"
+    },
+    "filingStatuses": {
+      "draft": "Entwurf",
+      "submitted": "Eingereicht"
+    },
+    "vatPeriods": {
+      "month": "Monatlich",
+      "quarter": "Vierteljährlich"
+    },
+    "vatBases": {
+      "soll": "Soll-Versteuerung (nach Rechnungsdatum)",
+      "ist": "Ist-Versteuerung (nach Zahlungseingang)"
+    },
+    "periodStatus": {
+      "submitted": "Eingereicht",
+      "handed_over": "Übergeben",
+      "ready": "Bereit",
+      "in_progress": "In Arbeit",
+      "open": "Offen"
+    },
+    "periodChangesSince": "{count, plural, =0 {Seit der Übergabe unverändert} one {# Änderung seit der Übergabe} other {# Änderungen seit der Übergabe}}",
+    "warnings": {
+      "no_tax_breakdown": "Auf dem Beleg wurde keine Aufteilung nach Steuersätzen erkannt.",
+      "amount_differs_from_payment": "Der Betrag weicht von der Zahlung ab.",
+      "possible_pass_through": "Der Beleg enthält möglicherweise durchlaufende Posten ohne Vorsteuer, zum Beispiel Gerichtskosten.",
+      "foreign_supplier_with_vat": "Ein ausländischer Anbieter berechnet deutsche Umsatzsteuer. Bitte prüfen Sie den Steuerschlüssel.",
+      "duplicate_suspect": "Möglicherweise doppelt: Es gibt bereits eine ähnliche Buchung.",
+      "ai_unavailable": "Die KI war nicht erreichbar. Der Vorschlag nutzt die Standardvorlage."
+    },
+    "controlStatuses": {
+      "ok": "Erfüllt",
+      "warning": "Bitte prüfen",
+      "failed": "Nicht erfüllt",
+      "not_applicable": "Nicht zutreffend"
+    },
+    "controls": {
+      "bank_matches_statement": {
+        "title": "Bank stimmt mit dem Kontoauszug",
+        "ok": "Der Stand jedes Bankkontos stimmt an jedem Tag mit dem Kontoauszug überein.",
+        "failed": "Konto {account} weicht ab dem {date} vom Kontoauszug ab.",
+        "not_applicable": "Es ist noch kein Bankkonto mit der Buchhaltung verbunden."
+      },
+      "unbooked_bank_transactions": {
+        "title": "Alle Bankumsätze gebucht",
+        "ok": "Jeder Bankumsatz ist gebucht.",
+        "failed": "{count, plural, one {# Bankumsatz ist} other {# Bankumsätze sind}} noch nicht gebucht."
+      },
+      "unbooked_documents": {
+        "title": "Alle Belege gebucht",
+        "ok": "Jeder Beleg ist gebucht.",
+        "warning": "{count, plural, one {# Beleg ist} other {# Belege sind}} noch nicht gebucht."
+      },
+      "open_item_accounts": {
+        "title": "Offene Posten geklärt",
+        "ok": "Jedes Konto mit offenen Posten steht auf null oder ist erklärt.",
+        "failed": "{count, plural, one {# Konto hat} other {# Konten haben}} offene Posten ohne Erklärung.",
+        "not_applicable": "Auf Konten mit offenen Posten ist noch nichts gebucht."
+      },
+      "unbalanced_entries": {
+        "title": "Vorschläge ausgeglichen",
+        "ok": "Kein Vorschlag hat eine Differenz zwischen Soll und Haben.",
+        "failed": "{count, plural, one {# Vorschlag hat} other {# Vorschläge haben}} eine Differenz zwischen Soll und Haben."
+      },
+      "proposals_waiting": {
+        "title": "Vorschläge geprüft",
+        "ok": "Es warten keine Vorschläge auf Ihre Prüfung.",
+        "warning": "{count, plural, one {# Vorschlag wartet} other {# Vorschläge warten}} auf Ihre Prüfung."
+      },
+      "advisor_differences": {
+        "title": "Abgleich mit der Steuerberaterin",
+        "ok": "Alle Salden stimmen mit der Summen- und Saldenliste der Steuerberaterin überein.",
+        "warning": "{count, plural, one {# Konto weicht} other {# Konten weichen}} von der Summen- und Saldenliste der Steuerberaterin ab.",
+        "not_applicable": "Für diesen Zeitraum liegt keine Summen- und Saldenliste der Steuerberaterin vor."
+      }
+    },
+    "summaries": {
+      "expensePaidByBank": "{amount, number, ::currency/EUR} für {account}, bezahlt über {counter}.",
+      "expenseAgainstOpenItem": "{amount, number, ::currency/EUR} für {account}, gebucht gegen {counter}, bis die Zahlung ausgeglichen ist.",
+      "expenseFromPrepaid": "{amount, number, ::currency/EUR} für {account}, bezahlt aus dem Guthaben auf {counter}.",
+      "expensePaidByShareholder": "{amount, number, ::currency/EUR} für {account}, privat bezahlt von {person}. Die Gesellschaft erstattet den Betrag.",
+      "reverseCharge": "{amount, number, ::currency/EUR} für {account} von einem ausländischen Anbieter, gegen {counter}. Die Umsatzsteuer schulden Sie selbst und ziehen sie als Vorsteuer wieder ab (§ 13b UStG).",
+      "revenue": "Einnahme von {amount, number, ::currency/EUR} auf {account}, gegen {counter}.",
+      "transfer": "{amount, number, ::currency/EUR} von {from} nach {to} umgebucht.",
+      "split": "{amount, number, ::currency/EUR} aufgeteilt auf {count} Konten.",
+      "manual": "Buchung über {amount, number, ::currency/EUR} mit {count, plural, one {# Zeile} other {# Zeilen}}."
+    }
   }
 }
