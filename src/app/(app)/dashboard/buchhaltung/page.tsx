@@ -29,8 +29,8 @@ function formatDate(isoDate: string): string {
   return new Intl.DateTimeFormat("de", { dateStyle: "medium" }).format(new Date(`${isoDate.slice(0, 10)}T00:00:00`));
 }
 
-/** Where a failing check is fixed. The account and report pages are the ledger's second UI
- * stage (`/dashboard/buchhaltung/konten`, `/auswertungen`). */
+/** Where a failing check is fixed: the review queue, the accounts page or the comparison with
+ * the tax advisor. */
 function controlHref(id: ControlId, row: Pick<PeriodOverviewRow, "from" | "to">): string {
   const period = `von=${row.from}&bis=${row.to}`;
   switch (id) {
@@ -41,7 +41,7 @@ function controlHref(id: ControlId, row: Pick<PeriodOverviewRow, "from" | "to">)
       return `/dashboard/buchhaltung/zu-pruefen?${period}`;
     case "bank_matches_statement":
     case "open_item_accounts":
-      return "/dashboard/buchhaltung/konten";
+      return `/dashboard/buchhaltung/konten?${period}`;
     case "advisor_differences":
       return "/dashboard/buchhaltung/auswertungen/abgleich";
   }
@@ -197,7 +197,7 @@ export default async function LedgerOverviewPage({ searchParams }: PageProps<"/d
             </p>
             {explained > 0 ? <p className="text-xs text-muted-foreground">{t("overview.openItemsExplained", { count: explained })}</p> : null}
           </Link>
-          <Link href={`/dashboard/buchhaltung/auswertungen/ust?von=${current.from}&bis=${current.to}`} className="flex flex-col gap-1 rounded-lg border border-border p-4 hover:bg-muted">
+          <Link href={`/dashboard/buchhaltung/auswertungen/ust?zeitraum=${current.key}`} className="flex flex-col gap-1 rounded-lg border border-border p-4 hover:bg-muted">
             <p className="text-sm text-muted-foreground">
               {t("overview.vatTile")} <PeriodName from={current.from} to={current.to} />
             </p>

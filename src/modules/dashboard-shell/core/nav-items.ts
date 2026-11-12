@@ -86,7 +86,10 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     items: [
       { href: "/dashboard/buchhaltung", labelKey: "ledgerOverview", permission: "finance.read", feature: "ledger" },
       { href: "/dashboard/buchhaltung/zu-pruefen", labelKey: "ledgerQueue", permission: "finance.read", feature: "ledger", badge: "ledgerProposals" },
+      { href: "/dashboard/buchhaltung/konten", labelKey: "ledgerAccounts", permission: "finance.read", feature: "ledger" },
       { href: "/dashboard/buchhaltung/journal", labelKey: "ledgerJournal", permission: "finance.read", feature: "ledger" },
+      { href: "/dashboard/buchhaltung/auswertungen", labelKey: "ledgerReports", permission: "finance.read", feature: "ledger" },
+      { href: "/dashboard/buchhaltung/einstellungen", labelKey: "ledgerSettings", permission: "finance.read", feature: "ledger" },
     ],
   },
   // decisions/0079-outgoing-invoices.md: writing invoices is everyday work for every member,

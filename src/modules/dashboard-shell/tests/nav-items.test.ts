@@ -156,7 +156,14 @@ describe("the ledger section", () => {
 
   it("gates every ledger entry behind finance.read and the ledger feature", () => {
     const ledgerEntries = entries.filter((item) => item.href?.startsWith("/dashboard/buchhaltung"));
-    expect(ledgerEntries.map((item) => item.href)).toEqual(["/dashboard/buchhaltung", "/dashboard/buchhaltung/zu-pruefen", "/dashboard/buchhaltung/journal"]);
+    expect(ledgerEntries.map((item) => item.href)).toEqual([
+      "/dashboard/buchhaltung",
+      "/dashboard/buchhaltung/zu-pruefen",
+      "/dashboard/buchhaltung/konten",
+      "/dashboard/buchhaltung/journal",
+      "/dashboard/buchhaltung/auswertungen",
+      "/dashboard/buchhaltung/einstellungen",
+    ]);
     expect(ledgerEntries.every((item) => item.permission === "finance.read" && item.feature === "ledger")).toBe(true);
   });
 
@@ -172,7 +179,7 @@ describe("the ledger section", () => {
 
   it("shows for an admin with the ledger enabled", () => {
     const sections = visibleNavSections(["finance.read"], NAV_SECTIONS, ["ledger"]);
-    expect(ledgerHrefs(sections)).toHaveLength(3);
+    expect(ledgerHrefs(sections)).toHaveLength(6);
     expect(sections.find((section) => section.labelKey === "sections.ledger")).toBeDefined();
   });
 
@@ -184,6 +191,14 @@ describe("the ledger section", () => {
     expect(activeNavHref("/dashboard/buchhaltung/zu-pruefen")).toBe("/dashboard/buchhaltung/zu-pruefen");
     expect(activeNavHref("/dashboard/buchhaltung/buchung/abc")).toBe("/dashboard/buchhaltung");
     expect(activeSectionKey("/dashboard/buchhaltung/journal")).toBe("sections.ledger");
+  });
+
+  it("marks Konten for an account sheet, Auswertungen and Einstellungen for their tabs", () => {
+    expect(activeNavHref("/dashboard/buchhaltung/konten/1800")).toBe("/dashboard/buchhaltung/konten");
+    expect(activeNavHref("/dashboard/buchhaltung/auswertungen/zeitraeume")).toBe("/dashboard/buchhaltung/auswertungen");
+    expect(activeNavHref("/dashboard/buchhaltung/einstellungen/regeln")).toBe("/dashboard/buchhaltung/einstellungen");
+    // The finance section's own "Konten" stays its own entry.
+    expect(activeNavHref("/dashboard/finance/abc")).toBe("/dashboard/finance");
   });
 
   it("has copy for the queue's badge", () => {

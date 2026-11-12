@@ -9,6 +9,8 @@ import { getEmailSourceForDocumentProjection } from "@/modules/mail-intake/serve
 import { isFakeAiProviderActive } from "@/platform/mistral/server";
 import { getDocumentPaymentSectionProjection, getSettlementReportProjection, listUnmatchedTransactionsProjection } from "@/modules/payments/server";
 import { PaymentSection, SettlementReportSection, type ManualLinkCandidate } from "@/modules/payments/client";
+import { getLedgerDocumentStatusProjection } from "@/modules/ledger/server";
+import { DocumentLedgerCard } from "@/modules/ledger/client";
 
 // F3b (decisions/0025-payment-matching-wiring.md): caps how many unmatched transactions the
 // "Transaktion manuell verknüpfen" dropdown offers - a plain recency-bounded slice, not scored
@@ -41,12 +43,15 @@ export default async function DocumentDetailPage({ params }: PageProps<"/dashboa
   // itself invoice-shaped (no `direction`/`totalAmountCents`), so `isInvoiceShaped` is always
   // `false` for one.
   const isSettlementReport = (document.kind === "payout_report" || document.kind === "platform_settlement") && document.intakeStatus === "confirmed";
-  const [paymentSection, manualLinkCandidates, settlementReport, emailSource] = await Promise.all([
+  const [paymentSection, manualLinkCandidates, settlementReport, emailSource, ledgerStatus] = await Promise.all([
     isInvoiceShaped ? getDocumentPaymentSectionProjection(access.workspace.id, id, canReadFinance) : Promise.resolve(null),
     isInvoiceShaped && canManageFinance ? listUnmatchedTransactionsProjection(access.workspace.id) : Promise.resolve(null),
     isSettlementReport && canReadFinance ? getSettlementReportProjection(access.workspace.id, id) : Promise.resolve(null),
     // decisions/0075-email-intake.md: a document without an uploader may have come in by mail.
     document.uploadedByEmail ? Promise.resolve(null) : getEmailSourceForDocumentProjection(access.workspace.id, id),
+    // decisions/0080: the ledger's status of this document, admin-only (an entry's accounts and
+    // amounts are finance information) and only while the workspace's ledger is on (else null).
+    canReadFinance ? getLedgerDocumentStatusProjection(access.workspace.id, id) : Promise.resolve(null),
   ]);
   const candidates: ManualLinkCandidate[] | undefined = manualLinkCandidates
     ?.slice(0, MANUAL_LINK_CANDIDATE_LIMIT)
@@ -71,6 +76,7 @@ export default async function DocumentDetailPage({ params }: PageProps<"/dashboa
         <PaymentSection documentId={id} section={paymentSection} canManage={canManageFinance} manualLinkCandidates={candidates} />
       ) : null}
       {settlementReport ? <SettlementReportSection report={settlementReport} /> : null}
+      {ledgerStatus ? <DocumentLedgerCard status={ledgerStatus} documentId={id} canManage={canManageFinance} /> : null}
     </div>
   );
 }
