@@ -215,15 +215,23 @@ export interface LedgerRepository {
 
   // Journal
   insertEntry(row: CreateJournalEntryRow): Promise<JournalEntryRow>;
-  findEntry(workspaceId: string, id: string): Promise<JournalEntryRow | null>;
-  findEntryBySourceKey(workspaceId: string, sourceKey: string): Promise<JournalEntryRow | null>;
-  updateEntry(workspaceId: string, id: string, patch: JournalEntryPatch): Promise<JournalEntryRow | null>;
+  /** `forUpdate` locks the row until the transaction ends (`SELECT ... FOR UPDATE`): a
+   * read-then-write that must not interleave with another writer. */
+  findEntry(workspaceId: string, id: string, options?: { forUpdate?: boolean }): Promise<JournalEntryRow | null>;
+  findEntryBySourceKey(workspaceId: string, sourceKey: string, options?: { forUpdate?: boolean }): Promise<JournalEntryRow | null>;
+  /** `null` when no row matched: not found, or, with a condition, changed since it was read.
+   * `expectedRevision`: only while the entry is still at that revision. `untouchedProposal`: only
+   * while it is a proposal no human booked, edited or dismissed (the proposal engine's write). */
+  updateEntry(workspaceId: string, id: string, patch: JournalEntryPatch, condition?: { expectedRevision?: number; untouchedProposal?: boolean }): Promise<JournalEntryRow | null>;
   deleteEntry(workspaceId: string, id: string): Promise<boolean>;
   /** Newest booking date first. */
   listEntries(workspaceId: string, filter: JournalEntryFilter): Promise<JournalEntryRow[]>;
-  /** Replaces every line of the entry. Open-item matches holding one of the old lines are
-   * dissolved as a whole: a changed line no longer settles what it settled. */
-  replaceLines(workspaceId: string, entryId: string, lines: CreateJournalLineRow[]): Promise<JournalLineRow[]>;
+  /** Makes the entry's lines `lines`. Identical lines are left alone. A line whose position,
+   * account, amount and document stay the same is updated in place (its id, and so its
+   * open-item match, survives); every other old line is deleted, and an open-item match holding
+   * one of those is dissolved as a whole: a changed line no longer settles what it settled.
+   * Returns how many matches were dissolved. */
+  replaceLines(workspaceId: string, entryId: string, lines: CreateJournalLineRow[]): Promise<{ lines: JournalLineRow[]; dissolvedMatches: number }>;
   /** Position order per entry. */
   listLines(workspaceId: string, entryIds: string[]): Promise<JournalLineWithAccount[]>;
   /** Every line of every entry with `status` (default booked) up to `to`, oldest first. */
@@ -242,6 +250,8 @@ export interface LedgerRepository {
   insertMatch(row: { workspaceId: string; accountId: string; kind: OpenItemMatchKind; note: string | null; createdByUserId: string | null }, lineIds: string[]): Promise<LedgerOpenItemMatchRow>;
   findMatch(workspaceId: string, id: string): Promise<LedgerOpenItemMatchRow | null>;
   deleteMatch(workspaceId: string, id: string): Promise<boolean>;
+  /** Dissolves every match holding a line of the entry (before it is unbooked or deleted). */
+  deleteMatchesForEntry(workspaceId: string, entryId: string): Promise<number>;
   listMatches(workspaceId: string, accountId?: string): Promise<Array<LedgerOpenItemMatchRow & { lineIds: string[] }>>;
   /** Which of these lines already belong to a match. */
   findMatchedLineIds(workspaceId: string, lineIds: string[]): Promise<string[]>;

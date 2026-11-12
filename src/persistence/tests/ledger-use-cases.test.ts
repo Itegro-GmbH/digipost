@@ -71,7 +71,7 @@ function fakeLedger(state: State): LedgerRepository {
     },
     replaceLines: async () => {
       state.writes.push("replaceLines");
-      return [];
+      return { lines: [], dissolvedMatches: 0 };
     },
     insertRevision: async (row) => {
       state.writes.push(`revision:${row.changeKind}`);

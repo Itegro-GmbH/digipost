@@ -18,6 +18,7 @@ export const LEDGER_USE_CASE_ERROR_CODES = [
   "not_booked",
   "not_proposed",
   "invalid_filing",
+  "filing_choice_required",
   "filing_overlaps",
   "filing_not_draft",
   "filing_not_submitted",

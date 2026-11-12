@@ -257,6 +257,9 @@ export const journalEntryRevisions = pgTable(
   },
   (t) => [
     index("journal_entry_revisions_entry_idx").on(t.workspaceId, t.entryRef, t.revision),
+    // One revision per number and entry: two writers on one entry can never both record
+    // "revision n" (the use cases also update conditionally on the revision they read).
+    uniqueIndex("journal_entry_revisions_entry_revision_key").on(t.entryRef, t.revision),
     index("journal_entry_revisions_changed_idx").on(t.workspaceId, t.changedAt),
   ],
 );

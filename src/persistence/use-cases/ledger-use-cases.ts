@@ -149,6 +149,7 @@ export const LEDGER_ERROR = {
   notBooked: "not_booked",
   notProposed: "not_proposed",
   invalidFiling: "invalid_filing",
+  filingChoiceRequired: "filing_choice_required",
   filingOverlaps: "filing_overlaps",
   filingNotDraft: "filing_not_draft",
   filingNotSubmitted: "filing_not_submitted",
@@ -166,7 +167,7 @@ const DEFAULT_SETTINGS: LedgerSettingsView = { enabled: false, vatPeriod: "month
 
 export type ProposalOutcome = "created" | "updated" | "kept";
 
-export type BulkBookResult = { booked: string[]; failed: { entryId: string; errorCode: LedgerErrorCode }[] };
+export type BulkBookResult = { booked: string[]; failed: { entryId: string; errorCode: LedgerErrorCode | "unknown" }[] };
 
 export type AdvisorComparisonView = { upload: AdvisorUploadView; comparison: AdvisorComparison };
 
@@ -465,8 +466,10 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
     }
   }
 
+  /** The entry, locked for the rest of the transaction: a read-then-write on it never interleaves
+   * with another writer (the second one waits and then sees the first one's result). */
   async function requireEntry(repos: Repositories, workspaceId: string, entryId: string): Promise<JournalEntryRow> {
-    const entry = await repos.ledger.findEntry(workspaceId, entryId);
+    const entry = await repos.ledger.findEntry(workspaceId, entryId, { forUpdate: true });
     if (!entry) throw new UseCaseError(LEDGER_ERROR.notFound);
     return entry;
   }
@@ -479,6 +482,25 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
 
   async function assertNotLocked(repos: Repositories, workspaceId: string, date: string, filingId: string | null): Promise<void> {
     if (await repos.ledger.findLockingFiling(workspaceId, date, filingId)) throw new UseCaseError(LEDGER_ERROR.locked);
+  }
+
+  /**
+   * The correcting filing a booked entry dated `date` goes with. One given by the caller stays
+   * (`validateReferences` checked it). Otherwise, in a period a submitted filing locks, the one
+   * draft correction that opens the date is taken; several make the caller choose
+   * (`filing_choice_required`); none leaves the date locked. Outside a locked period: `null`.
+   */
+  async function correctionFilingFor(repos: Repositories, workspaceId: string, date: string, filingId: string | null): Promise<string | null> {
+    if (filingId) return filingId;
+    if (!(await repos.ledger.findLockingFiling(workspaceId, date, null))) return null;
+    const drafts = (await repos.ledger.listFilings(workspaceId)).filter((filing) => filing.status === "draft" && filing.correctsFilingId !== null);
+    const opening: string[] = [];
+    for (const draft of drafts) {
+      if (!(await repos.ledger.findLockingFiling(workspaceId, date, draft.id))) opening.push(draft.id);
+    }
+    if (opening.length === 1) return opening[0]!;
+    if (opening.length > 1) throw new UseCaseError(LEDGER_ERROR.filingChoiceRequired);
+    throw new UseCaseError(LEDGER_ERROR.locked);
   }
 
   /** The entry's base lines expanded with their tax lines and resolved to accounts of this
@@ -560,9 +582,19 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
   ): Promise<void> {
     const lines = await repos.ledger.listLines(input.workspaceId, [input.entry.id]);
     const revision = input.entry.revision + 1;
-    const updated = await repos.ledger.updateEntry(input.workspaceId, input.entry.id, { ...input.patch, revision });
-    if (!updated) throw new UseCaseError(LEDGER_ERROR.notFound);
+    const updated = await repos.ledger.updateEntry(input.workspaceId, input.entry.id, { ...input.patch, revision }, { expectedRevision: input.entry.revision });
+    if (!updated) throw new UseCaseError(LEDGER_ERROR.staleRevision);
     await writeRevision(repos, { workspaceId: input.workspaceId, entry: updated, revision, changeKind: input.changeKind, reason: input.reason, userId: input.userId, before: snapshotOf(input.entry, lines) });
+  }
+
+  /** The automatic matches after a booking that already committed: a failure here is logged,
+   * never reported as a failed booking (the next booking or sync matches again). */
+  async function autoMatchAfterBooking(workspaceId: string): Promise<void> {
+    try {
+      await api.autoMatchOpenItems(workspaceId);
+    } catch (err) {
+      console.error("[ledger] automatic matching after booking failed", err instanceof Error ? err.name : "unknown");
+    }
   }
 
   async function bookOne(workspaceId: string, userId: string, entryId: string): Promise<void> {
@@ -573,8 +605,9 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
       if (entry.dismissedAt) throw new UseCaseError(LEDGER_ERROR.notProposed);
       const lines = await repos.ledger.listLines(workspaceId, [entry.id]);
       if (!isBalanced(lines)) throw new UseCaseError(LEDGER_ERROR.unbalanced);
-      await assertNotLocked(repos, workspaceId, entry.bookingDate, entry.filingId);
-      await changeState(repos, { workspaceId, userId, entry, changeKind: "booked", reason: null, patch: { status: "booked", bookedAt: now(), bookedByUserId: userId } });
+      const filingId = await correctionFilingFor(repos, workspaceId, entry.bookingDate, entry.filingId);
+      await assertNotLocked(repos, workspaceId, entry.bookingDate, filingId);
+      await changeState(repos, { workspaceId, userId, entry, changeKind: "booked", reason: null, patch: { status: "booked", bookedAt: now(), bookedByUserId: userId, filingId } });
       // A rule's proposal booked: one more hit for the rule (`originReason` is `rule:<id>`).
       const ruleId = entry.origin === "rule" && entry.originReason?.startsWith("rule:") ? entry.originReason.slice("rule:".length) : null;
       if (ruleId) await repos.ledger.incrementRuleHits(workspaceId, ruleId);
@@ -1207,14 +1240,17 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
         await requireEnabled(workspaceId, repos);
         await validateReferences(repos, workspaceId, entry);
         const { expanded, rows } = await prepareLines(repos, workspaceId, entry);
+        let filingId = entry.filingId ?? null;
         if (book) {
           if (!isBalanced(expanded)) throw new UseCaseError(LEDGER_ERROR.unbalanced);
-          await assertNotLocked(repos, workspaceId, entry.bookingDate, entry.filingId ?? null);
+          filingId = await correctionFilingFor(repos, workspaceId, entry.bookingDate, filingId);
+          await assertNotLocked(repos, workspaceId, entry.bookingDate, filingId);
         }
         const at = now();
         const created = await repos.ledger.insertEntry({
           workspaceId,
           ...entryFields(entry),
+          filingId,
           status: book ? "booked" : "proposed",
           origin: "manual",
           originReason: null,
@@ -1239,16 +1275,18 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
         if (booked && !reason) throw new UseCaseError(LEDGER_ERROR.reasonRequired);
         await validateReferences(repos, workspaceId, entry);
         const { expanded, rows } = await prepareLines(repos, workspaceId, entry);
-        const filingId = entry.filingId ?? null;
+        let filingId = entry.filingId ?? null;
         if (booked) {
           if (!isBalanced(expanded)) throw new UseCaseError(LEDGER_ERROR.unbalanced);
+          filingId = await correctionFilingFor(repos, workspaceId, entry.bookingDate, filingId);
           await assertNotLocked(repos, workspaceId, current.bookingDate, filingId);
           await assertNotLocked(repos, workspaceId, entry.bookingDate, filingId);
         }
         const before = snapshotOf(current, await repos.ledger.listLines(workspaceId, [current.id]));
         const revision = current.revision + 1;
-        const updated = await repos.ledger.updateEntry(workspaceId, current.id, { ...entryFields(entry), userEditedAt: now(), revision });
-        if (!updated) throw new UseCaseError(LEDGER_ERROR.notFound);
+        const updated = await repos.ledger.updateEntry(workspaceId, current.id, { ...entryFields(entry), filingId, userEditedAt: now(), revision }, { expectedRevision: current.revision });
+        if (!updated) throw new UseCaseError(LEDGER_ERROR.staleRevision);
+        // Unchanged lines stay as they are, with their open-item matches.
         await repos.ledger.replaceLines(workspaceId, current.id, rows);
         await writeRevision(repos, { workspaceId, entry: updated, revision, changeKind: "edited", reason: reason ?? null, userId, before });
         return { entryId: current.id, revision };
@@ -1265,6 +1303,8 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
         }
         const before = snapshotOf(current, await repos.ledger.listLines(workspaceId, [current.id]));
         await writeRevision(repos, { workspaceId, entry: current, revision: current.revision + 1, changeKind: "deleted", reason: reason ?? null, userId, before });
+        // A match must not outlive one of its lines (it would settle the rest on its own).
+        await repos.ledger.deleteMatchesForEntry(workspaceId, current.id);
         await repos.ledger.deleteEntry(workspaceId, current.id);
       });
     },
@@ -1272,7 +1312,7 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
     async bookEntry({ workspaceId, userId, entryId }) {
       await bookOne(workspaceId, userId, entryId);
       // The invoice and its payment may both be booked now: match them right away.
-      await api.autoMatchOpenItems(workspaceId);
+      await autoMatchAfterBooking(workspaceId);
     },
 
     async unbookEntry({ workspaceId, userId, entryId, reason }) {
@@ -1282,6 +1322,8 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
         if (entry.status !== "booked") throw new UseCaseError(LEDGER_ERROR.notBooked);
         if (!reason) throw new UseCaseError(LEDGER_ERROR.reasonRequired);
         await assertNotLocked(repos, workspaceId, entry.bookingDate, entry.filingId);
+        // A proposal settles nothing: its lines leave their matches.
+        await repos.ledger.deleteMatchesForEntry(workspaceId, entry.id);
         await changeState(repos, { workspaceId, userId, entry, changeKind: "unbooked", reason, patch: { status: "proposed", bookedAt: null, bookedByUserId: null } });
       });
     },
@@ -1294,11 +1336,16 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
           await bookOne(workspaceId, userId, entryId);
           result.booked.push(entryId);
         } catch (err) {
-          if (!(err instanceof UseCaseError)) throw err;
-          result.failed.push({ entryId, errorCode: err.code as LedgerErrorCode });
+          // Any failure stays with its entry; the rest are still booked.
+          if (err instanceof UseCaseError) {
+            result.failed.push({ entryId, errorCode: err.code as LedgerErrorCode });
+          } else {
+            console.error("[ledger] bulk booking of one entry failed", err instanceof Error ? err.name : "unknown");
+            result.failed.push({ entryId, errorCode: "unknown" });
+          }
         }
       }
-      if (result.booked.length > 0) await api.autoMatchOpenItems(workspaceId);
+      if (result.booked.length > 0) await autoMatchAfterBooking(workspaceId);
       return result;
     },
 
@@ -1325,7 +1372,9 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
       try {
         return await transact(async (repos) => {
           await requireEnabled(workspaceId, repos);
-          const existing = await repos.ledger.findEntryBySourceKey(workspaceId, proposal.sourceKey);
+          // Locked until the end: a human's edit, booking or dismissal waits for this write or
+          // is seen by it, never overwritten.
+          const existing = await repos.ledger.findEntryBySourceKey(workspaceId, proposal.sourceKey, { forUpdate: true });
           if (existing && (existing.status === "booked" || existing.dismissedAt || existing.userEditedAt)) {
             return { entryId: existing.id, outcome: "kept" as const };
           }
@@ -1363,8 +1412,8 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
           if (sameSnapshot(before, after) && sameWarnings) return { entryId: existing.id, outcome: "kept" as const };
 
           const revision = existing.revision + 1;
-          const updated = await repos.ledger.updateEntry(workspaceId, existing.id, { ...fields, revision });
-          if (!updated) throw new UseCaseError(LEDGER_ERROR.notFound);
+          const updated = await repos.ledger.updateEntry(workspaceId, existing.id, { ...fields, revision }, { expectedRevision: existing.revision, untouchedProposal: true });
+          if (!updated) return { entryId: existing.id, outcome: "kept" as const };
           await repos.ledger.replaceLines(workspaceId, existing.id, rows);
           await writeRevision(repos, { workspaceId, entry: updated, revision, changeKind: "edited", reason: null, userId: null, before });
           return { entryId: existing.id, outcome: "updated" as const };

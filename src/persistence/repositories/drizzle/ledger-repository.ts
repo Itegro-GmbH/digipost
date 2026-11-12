@@ -5,7 +5,7 @@ import { and, asc, count, desc, eq, gt, gte, inArray, isNotNull, isNull, like, l
 
 import { LEDGER_BOOKABLE_DOCUMENT_KINDS } from "@/modules/ledger";
 import type { DbExecutor } from "@/persistence/foundation/db-types";
-import type { LedgerRepository } from "@/persistence/repositories/contracts/ledger-repository";
+import type { CreateJournalLineRow, JournalLineRow, LedgerRepository } from "@/persistence/repositories/contracts/ledger-repository";
 import { accounts, importBatches, transactions } from "@/persistence/schema/accounts";
 import { contacts } from "@/persistence/schema/contacts";
 import { documents } from "@/persistence/schema/documents";
@@ -115,29 +115,38 @@ export function createDrizzleLedgerRepository(db: DbExecutor): LedgerRepository 
       return first(await db.insert(journalEntries).values(row).returning(), "journal_entries");
     },
 
-    async findEntry(workspaceId, id) {
-      const [row] = await db
+    async findEntry(workspaceId, id, options) {
+      const query = db
         .select()
         .from(journalEntries)
         .where(and(eq(journalEntries.workspaceId, workspaceId), eq(journalEntries.id, id)))
         .limit(1);
+      const [row] = options?.forUpdate ? await query.for("update") : await query;
       return row ?? null;
     },
 
-    async findEntryBySourceKey(workspaceId, sourceKey) {
-      const [row] = await db
+    async findEntryBySourceKey(workspaceId, sourceKey, options) {
+      const query = db
         .select()
         .from(journalEntries)
         .where(and(eq(journalEntries.workspaceId, workspaceId), eq(journalEntries.sourceKey, sourceKey)))
         .limit(1);
+      const [row] = options?.forUpdate ? await query.for("update") : await query;
       return row ?? null;
     },
 
-    async updateEntry(workspaceId, id, patch) {
+    async updateEntry(workspaceId, id, patch, condition) {
+      // Postgres re-checks the WHERE on the newest row version after waiting for a concurrent
+      // writer, so a condition here cannot be passed by a change committed in between.
+      const conditions: SQL[] = [eq(journalEntries.workspaceId, workspaceId), eq(journalEntries.id, id)];
+      if (condition?.expectedRevision !== undefined) conditions.push(eq(journalEntries.revision, condition.expectedRevision));
+      if (condition?.untouchedProposal) {
+        conditions.push(eq(journalEntries.status, "proposed"), isNull(journalEntries.userEditedAt), isNull(journalEntries.dismissedAt));
+      }
       const [row] = await db
         .update(journalEntries)
         .set({ ...patch, updatedAt: new Date() })
-        .where(and(eq(journalEntries.workspaceId, workspaceId), eq(journalEntries.id, id)))
+        .where(and(...conditions))
         .returning();
       return row ?? null;
     },
@@ -178,21 +187,63 @@ export function createDrizzleLedgerRepository(db: DbExecutor): LedgerRepository 
     },
 
     async replaceLines(workspaceId, entryId, lines) {
-      const oldLines = db
-        .select({ id: journalLines.id })
+      const old = await db
+        .select()
         .from(journalLines)
-        .where(and(eq(journalLines.workspaceId, workspaceId), eq(journalLines.entryId, entryId)));
-      const affectedMatches = db
-        .select({ id: ledgerOpenItemMatchLines.matchId })
-        .from(ledgerOpenItemMatchLines)
-        .where(and(eq(ledgerOpenItemMatchLines.workspaceId, workspaceId), inArray(ledgerOpenItemMatchLines.lineId, oldLines)));
-      await db.delete(ledgerOpenItemMatches).where(and(eq(ledgerOpenItemMatches.workspaceId, workspaceId), inArray(ledgerOpenItemMatches.id, affectedMatches)));
-      await db.delete(journalLines).where(and(eq(journalLines.workspaceId, workspaceId), eq(journalLines.entryId, entryId)));
-      if (lines.length === 0) return [];
-      return db
-        .insert(journalLines)
-        .values(lines.map((line) => ({ ...line, workspaceId, entryId })))
-        .returning();
+        .where(and(eq(journalLines.workspaceId, workspaceId), eq(journalLines.entryId, entryId)))
+        .orderBy(asc(journalLines.position));
+      const oldByPosition = new Map(old.map((line) => [line.position, line]));
+      // What an open item is: a line keeping these keeps its id, and so its match.
+      const sameItem = (a: CreateJournalLineRow, b: CreateJournalLineRow) =>
+        a.position === b.position && a.accountId === b.accountId && a.amountCents === b.amountCents && (a.documentId ?? null) === (b.documentId ?? null);
+      const sameLine = (a: CreateJournalLineRow, b: CreateJournalLineRow) =>
+        sameItem(a, b) && a.taxCode === b.taxCode && a.taxRole === b.taxRole && a.generatedFromLinePosition === b.generatedFromLinePosition && (a.text ?? null) === (b.text ?? null);
+
+      if (old.length === lines.length && lines.every((line) => oldByPosition.has(line.position) && sameLine(oldByPosition.get(line.position)!, line))) {
+        return { lines: old, dissolvedMatches: 0 };
+      }
+
+      const kept = lines.filter((line) => oldByPosition.has(line.position) && sameItem(oldByPosition.get(line.position)!, line));
+      const keptPositions = new Set(kept.map((line) => line.position));
+      const removed = old.filter((line) => !keptPositions.has(line.position)).map((line) => line.id);
+      let dissolvedMatches = 0;
+      if (removed.length > 0) {
+        const affected = db
+          .select({ id: ledgerOpenItemMatchLines.matchId })
+          .from(ledgerOpenItemMatchLines)
+          .where(and(eq(ledgerOpenItemMatchLines.workspaceId, workspaceId), inArray(ledgerOpenItemMatchLines.lineId, removed)));
+        dissolvedMatches = (
+          await db
+            .delete(ledgerOpenItemMatches)
+            .where(and(eq(ledgerOpenItemMatches.workspaceId, workspaceId), inArray(ledgerOpenItemMatches.id, affected)))
+            .returning({ id: ledgerOpenItemMatches.id })
+        ).length;
+        await db.delete(journalLines).where(and(eq(journalLines.workspaceId, workspaceId), inArray(journalLines.id, removed)));
+      }
+      const result: JournalLineRow[] = [];
+      for (const line of kept) {
+        const previous = oldByPosition.get(line.position)!;
+        if (sameLine(previous, line)) {
+          result.push(previous);
+          continue;
+        }
+        const [updated] = await db
+          .update(journalLines)
+          .set({ taxCode: line.taxCode, taxRole: line.taxRole, generatedFromLinePosition: line.generatedFromLinePosition, text: line.text })
+          .where(and(eq(journalLines.workspaceId, workspaceId), eq(journalLines.id, previous.id)))
+          .returning();
+        result.push(updated ?? previous);
+      }
+      const added = lines.filter((line) => !keptPositions.has(line.position));
+      if (added.length > 0) {
+        result.push(
+          ...(await db
+            .insert(journalLines)
+            .values(added.map((line) => ({ ...line, workspaceId, entryId })))
+            .returning()),
+        );
+      }
+      return { lines: result.sort((a, b) => a.position - b.position), dissolvedMatches };
     },
 
     async listLines(workspaceId, entryIds) {
@@ -336,6 +387,22 @@ export function createDrizzleLedgerRepository(db: DbExecutor): LedgerRepository 
         .where(and(eq(ledgerOpenItemMatches.workspaceId, workspaceId), eq(ledgerOpenItemMatches.id, id)))
         .returning({ id: ledgerOpenItemMatches.id });
       return rows.length > 0;
+    },
+
+    async deleteMatchesForEntry(workspaceId, entryId) {
+      const lines = db
+        .select({ id: journalLines.id })
+        .from(journalLines)
+        .where(and(eq(journalLines.workspaceId, workspaceId), eq(journalLines.entryId, entryId)));
+      const affected = db
+        .select({ id: ledgerOpenItemMatchLines.matchId })
+        .from(ledgerOpenItemMatchLines)
+        .where(and(eq(ledgerOpenItemMatchLines.workspaceId, workspaceId), inArray(ledgerOpenItemMatchLines.lineId, lines)));
+      const rows = await db
+        .delete(ledgerOpenItemMatches)
+        .where(and(eq(ledgerOpenItemMatches.workspaceId, workspaceId), inArray(ledgerOpenItemMatches.id, affected)))
+        .returning({ id: ledgerOpenItemMatches.id });
+      return rows.length;
     },
 
     async listMatches(workspaceId, accountId) {

@@ -308,7 +308,14 @@ describe("ledger: open-item matches", () => {
     const second = await caught(repo.insertMatch({ workspaceId: workspace.id, accountId: account("3300").id, kind: "match", note: null, createdByUserId: null }, [payables[0]!]));
     expect(isDbError(second, "unique")).toBe(true);
 
-    await db.transaction(async (tx) => createDrizzleLedgerRepository(tx).replaceLines(workspace.id, payment.id, lines(account("3300"), account("1800"), 1000)));
+    // The same lines again: nothing is replaced, the match stays.
+    const same = await db.transaction(async (tx) => createDrizzleLedgerRepository(tx).replaceLines(workspace.id, payment.id, lines(account("3300"), account("1800"), 1000)));
+    expect(same.dissolvedMatches).toBe(0);
+    expect(await repo.findMatch(workspace.id, match.id)).not.toBeNull();
+
+    // A changed amount on the matched line: the match is dissolved.
+    const changed = await db.transaction(async (tx) => createDrizzleLedgerRepository(tx).replaceLines(workspace.id, payment.id, lines(account("3300"), account("1800"), 900)));
+    expect(changed.dissolvedMatches).toBe(1);
     expect(await repo.findMatch(workspace.id, match.id)).toBeNull();
     expect(await repo.findMatchedLineIds(workspace.id, payables)).toEqual([]);
   });

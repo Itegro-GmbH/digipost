@@ -1849,6 +1849,7 @@
       "not_booked": "Diese Buchung ist nicht gebucht.",
       "not_proposed": "Das ist nur bei einem offenen Vorschlag möglich.",
       "invalid_filing": "Die gewählte Meldung ist keine offene berichtigte Meldung für dieses Datum.",
+      "filing_choice_required": "Für dieses Datum gibt es mehrere offene berichtigte Meldungen. Bitte wählen Sie, zu welcher die Buchung gehört.",
       "filing_overlaps": "Für diesen Zeitraum gibt es bereits eine Meldung.",
       "filing_not_draft": "Diese Meldung ist bereits eingereicht.",
       "filing_not_submitted": "Nur eine eingereichte Meldung kann berichtigt werden.",
