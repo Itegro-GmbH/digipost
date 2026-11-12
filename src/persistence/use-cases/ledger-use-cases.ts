@@ -55,11 +55,13 @@ import {
   expandTaxLines,
   isBalanced,
   LEDGER_DB_RAISES,
+  MAX_ADVISOR_FILE_BYTES,
   lineDifference,
   listEntriesFilterSchema,
   nextFreeNumber,
   parseDatevBalanceList,
   PLATFORM_RECEIVABLE_NUMBERS,
+  priorYearsResult,
   ruleTaxCodeFits,
   platformLedgerAccountText,
   SKR04_SEED_ACCOUNTS,
@@ -423,6 +425,16 @@ function clampToStart(period: Period, startDate: string | null): Period | null {
   if (!startDate || startDate <= period.from) return period;
   if (startDate > period.to) return null;
   return { from: startDate, to: period.to };
+}
+
+/** The booked result of the years before `from`'s, which 2970 opens with (`computeBalances`). */
+function carriedResult(accounts: readonly LedgerAccountRow[], lines: readonly ReportLine[], from: string): number {
+  const kinds = new Map(accounts.map((account) => [account.id, account.kind]));
+  return priorYearsResult(
+    (id) => kinds.get(id),
+    lines.filter((line) => !line.proposed),
+    from,
+  );
 }
 
 function sameSnapshot(a: EntrySnapshot, b: EntrySnapshot): boolean {
@@ -1399,7 +1411,7 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
         toReportAccount(account),
         lines.filter((line) => entries.has(line.entryId)),
         { from, to },
-        { countProposals },
+        { countProposals, carriedResultCents: carriedResult(accounts, lines, from) },
       );
     },
 
@@ -1416,6 +1428,7 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
             toReportAccount(account),
             lines.filter((line) => entries.has(line.entryId)),
             { from, to },
+            { carriedResultCents: carriedResult(accounts, lines, from) },
           );
         });
     },
@@ -1638,6 +1651,7 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
     // -----------------------------------------------------------------------------------------
     async uploadAdvisorBalances({ workspaceId, userId, periodFrom, periodTo, fileName, csvText }) {
       await requireEnabled(workspaceId);
+      if (Buffer.byteLength(csvText, "utf8") > MAX_ADVISOR_FILE_BYTES) throw new UseCaseError(LEDGER_ERROR.advisorFileInvalid);
       const parsed = parseDatevBalanceList(csvText);
       if (!parsed.ok) throw new UseCaseError(LEDGER_ERROR.advisorFileInvalid);
       const row = await transact((repos) =>

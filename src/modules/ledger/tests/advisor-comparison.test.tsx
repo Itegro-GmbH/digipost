@@ -99,6 +99,17 @@ describe("AdvisorUploadForm", () => {
   });
 });
 
+describe("AdvisorUploadForm: size", () => {
+  it("refuses a file over 900 KB before sending it", async () => {
+    wrap(<AdvisorUploadForm defaultFrom="2026-07-01" defaultTo="2026-09-30" />);
+    const file = new File(["x".repeat(900 * 1024 + 1)], "riesig.csv", { type: "text/csv" });
+    fireEvent.change(screen.getByLabelText("Datei"), { target: { files: [file] } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Hochladen und vergleichen" })));
+    expect((await screen.findByRole("alert")).textContent).toBe(de.Ledger.errors.advisor_file_invalid);
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("AdvisorUploadsList", () => {
   it("deletes an upload after confirmation", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);

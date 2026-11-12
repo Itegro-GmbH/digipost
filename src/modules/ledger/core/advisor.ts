@@ -6,8 +6,13 @@
 
 export type AdvisorBalanceRow = { accountNumber: string; accountName: string | null; balanceCents: number };
 
-export const ADVISOR_PARSE_ERRORS = ["no_header", "no_balance_column", "no_rows"] as const;
+export const ADVISOR_PARSE_ERRORS = ["no_header", "no_balance_column", "no_rows", "too_many_rows", "amount_too_large"] as const;
 export type AdvisorParseError = (typeof ADVISOR_PARSE_ERRORS)[number];
+
+/** A Summen- und Saldenliste has a few hundred accounts; more rows is not one. */
+export const MAX_ADVISOR_ROWS = 5000;
+/** A balance is stored in a Postgres `integer`. */
+const MAX_BALANCE_CENTS = 2_147_483_647;
 
 export type AdvisorParseResult =
   | { ok: true; rows: AdvisorBalanceRow[]; skippedLines: number[] }
@@ -145,6 +150,8 @@ export function parseDatevBalanceList(csv: string): AdvisorParseResult {
       skippedLines.push(i + 1);
       continue;
     }
+    if (!Number.isSafeInteger(cents) || Math.abs(cents) > MAX_BALANCE_CENTS) return { ok: false, error: "amount_too_large" };
+    if (rows.length >= MAX_ADVISOR_ROWS) return { ok: false, error: "too_many_rows" };
     const name = layout.name !== null ? (cells[layout.name] ?? "").trim() : "";
     rows.push({ accountNumber, accountName: name === "" ? null : name, balanceCents: cents });
   }

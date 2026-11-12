@@ -119,11 +119,23 @@ export type ExpandedLine = {
   text: string | null;
 };
 
-/** A printed tax amount that can stand in for the computed one: same sign, not larger. */
-function usablePrintedTax(taxCents: number | null | undefined, amountCents: number): taxCents is number {
+/** A printed tax amount that can stand in for the computed one: same sign, not larger, and on a
+ * gross amount smaller than it (a tax as large as the gross would leave a base of zero). */
+function usablePrintedTax(taxCents: number | null | undefined, amountCents: number, mode: AmountMode): taxCents is number {
   if (taxCents === null || taxCents === undefined || !Number.isInteger(taxCents)) return false;
   if (taxCents === 0) return true;
-  return Math.sign(taxCents) === Math.sign(amountCents) && Math.abs(taxCents) <= Math.abs(amountCents);
+  if (Math.sign(taxCents) !== Math.sign(amountCents)) return false;
+  return mode === "gross" ? Math.abs(taxCents) < Math.abs(amountCents) : Math.abs(taxCents) <= Math.abs(amountCents);
+}
+
+/** Whether `expandTaxLines` drops a printed tax amount of these lines for the computed one (the
+ * editor tells the user, since the document's figure is not what gets booked). */
+export function printedTaxIgnored(lines: readonly BaseLineInput[]): boolean {
+  return lines.some((line) => {
+    if (!line.taxCode || line.taxCents === null || line.taxCents === undefined) return false;
+    const kind = TAX_CODE_DEFINITIONS[line.taxCode].kind;
+    return (kind === "input" || kind === "output") && !usablePrintedTax(line.taxCents, line.amountCents, line.amountMode ?? "gross");
+  });
 }
 
 /**
@@ -165,7 +177,7 @@ export function expandTaxLines(lines: readonly BaseLineInput[]): ExpandedLine[] 
 
     if ((def.kind === "input" || def.kind === "output") && def.taxAccountNumber) {
       const computed = mode === "gross" ? taxFromGross(line.amountCents, def.ratePercent) : taxFromNet(line.amountCents, def.ratePercent);
-      const tax = usablePrintedTax(line.taxCents, line.amountCents) ? line.taxCents : computed;
+      const tax = usablePrintedTax(line.taxCents, line.amountCents, mode) ? line.taxCents : computed;
       const baseCents = mode === "gross" ? line.amountCents - tax : line.amountCents;
       const base = { position: out.length + 1, accountNumber: line.accountNumber, amountCents: baseCents, taxCode: code, taxRole: "base" as const, generatedFromLinePosition: null, documentId, text };
       out.push(base);

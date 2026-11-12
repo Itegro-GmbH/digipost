@@ -30,6 +30,9 @@ export const MAX_MATCH_LINES = 500;
 export const MAX_LINE_AMOUNT_CENTS = 1_000_000_000;
 /** A DATEV list of a few hundred accounts is well below 1 MB. */
 export const MAX_ADVISOR_CSV_LENGTH = 2_000_000;
+/** The largest uploaded file, in bytes: below the 1 MB a Server Action body may carry, and far
+ * above a real list. The form checks it before reading, the use case again. */
+export const MAX_ADVISOR_FILE_BYTES = 900 * 1024;
 
 const text = (max: number) => z.string().trim().max(max);
 const optionalText = (max: number) => z.string().trim().max(max).nullable().optional();

@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
-import type { EntryInput } from "@/modules/ledger";
+import { MAX_ADVISOR_FILE_BYTES, type EntryInput } from "@/modules/ledger";
 import { getDb } from "@/persistence/foundation/client";
 import { createDrizzleRepositories } from "@/persistence/repositories/drizzle/create-repositories";
 import { createDrizzleUnitOfWork } from "@/persistence/repositories/drizzle/unit-of-work";
@@ -352,6 +352,9 @@ describe("ledger open items: Google Ads charged first, invoiced later", () => {
     // As of August, before the invoice, the account is open: what was charged but not invoiced.
     expect((await ledger.listOpenItemAccounts(workspaceId, "2026-08-31")).find((summary) => summary.account.number === "1462")).toMatchObject({ balanceCents: 6000 });
 
+    // As of August the match is not complete yet (the invoice is from September): still open.
+    expect((await ledger.getOpenItems(workspaceId, { accountNumber: "1462", asOf: "2026-08-31" }))?.unmatched).toHaveLength(2);
+
     await ledger.deleteMatch({ workspaceId, matchId });
     expect(await code(ledger.deleteMatch({ workspaceId, matchId }))).toBe("not_found");
   });
@@ -407,6 +410,9 @@ describe("ledger controls and the period overview", () => {
     const { workspaceId } = await enabledWorkspace();
     await ledger.createEntry({ workspaceId, userId: USER, entry: ionos(), book: true });
     expect(await code(ledger.uploadAdvisorBalances({ workspaceId, userId: USER, periodFrom: "2026-07-01", periodTo: "2026-07-31", csvText: "Datum;Betrag" }))).toBe("advisor_file_invalid");
+    const tooLarge = `Konto;Saldo\n1800;1,00\n${"x".repeat(MAX_ADVISOR_FILE_BYTES)}`;
+    expect(await code(ledger.uploadAdvisorBalances({ workspaceId, userId: USER, periodFrom: "2026-07-01", periodTo: "2026-07-31", csvText: tooLarge }))).toBe("advisor_file_invalid");
+    expect(await code(ledger.uploadAdvisorBalances({ workspaceId, userId: USER, periodFrom: "2026-07-01", periodTo: "2026-07-31", csvText: "Konto;Saldo\n1800;99999999999,00" }))).toBe("advisor_file_invalid");
     const csv = "Konto;Beschriftung;Saldo;S/H\n1406;Vorsteuer;0,24;S\n1800;Bank;1,50;H\n6810;Internet;1,26;S\n6855;Geldverkehr;0,00;S";
     const upload = await ledger.uploadAdvisorBalances({ workspaceId, userId: USER, periodFrom: "2026-07-01", periodTo: "2026-07-31", fileName: "SuSa_07.csv", csvText: csv });
     expect(upload).toMatchObject({ lineCount: 4, fileName: "SuSa_07.csv" });
@@ -422,6 +428,27 @@ describe("ledger controls and the period overview", () => {
     expect((await ledger.listAdvisorUploads(workspaceId)).map((row) => row.id)).toEqual([second.id, upload.id]);
     await ledger.deleteAdvisorUpload({ workspaceId, uploadId: second.id });
     expect(await ledger.getAdvisorComparison(workspaceId, second.id)).toBeNull();
+  });
+});
+
+describe("ledger across a year boundary", () => {
+  it("opens 2027 with the 2026 result on 2970, in the list, the Kontenblatt and the advisor comparison", async () => {
+    const { workspaceId } = await enabledWorkspace();
+    await ledger.createEntry({ workspaceId, userId: USER, entry: { bookingDate: "2026-07-15", text: "Erlös", lines: [{ accountNumber: "1800", amountCents: 50_000 }, { accountNumber: "4400", amountCents: -50_000 }] }, book: true });
+    await ledger.createEntry({ workspaceId, userId: USER, entry: ionos({ bookingDate: "2026-08-01" }), book: true });
+    await ledger.createEntry({ workspaceId, userId: USER, entry: ionos({ bookingDate: "2027-01-05" }), book: true });
+
+    const balances = await ledger.getBalances(workspaceId, { from: "2027-01-01", to: "2027-01-31" });
+    const byNumber = new Map(balances.rows.map((row) => [row.number, row]));
+    expect(byNumber.get("2970")).toMatchObject({ openingCents: -49_874, closingCents: -49_874 });
+    expect(byNumber.get("4400")).toBeUndefined();
+    expect(balances.totals.openingCents).toBe(0);
+    expect(balances.totals.closingCents).toBe(0);
+    expect((await ledger.getAccountSheet(workspaceId, { accountNumber: "2970", from: "2027-01-01", to: "2027-01-31" }))?.openingCents).toBe(-49_874);
+
+    const csv = "Konto;Beschriftung;Saldo;S/H\n1406;Vorsteuer;0,48;S\n1800;Bank;497,00;S\n2970;Gewinnvortrag;498,74;H\n6810;Internet;1,26;S";
+    const upload = await ledger.uploadAdvisorBalances({ workspaceId, userId: USER, periodFrom: "2027-01-01", periodTo: "2027-01-31", csvText: csv });
+    expect((await ledger.getAdvisorComparison(workspaceId, upload.id))?.comparison.differenceCount).toBe(0);
   });
 });
 

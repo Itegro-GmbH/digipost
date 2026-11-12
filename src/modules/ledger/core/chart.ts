@@ -38,6 +38,13 @@ export const SKR04_SEED_ACCOUNTS: readonly SeedAccount[] = [
   seed("1421", "Umsatzsteuerforderungen", "asset", "taxes", "Ein Guthaben beim Finanzamt aus einer Umsatzsteuer-Voranmeldung."),
   seed("1800", "Bank", "asset", "bank", "Ihr Geschäftskonto. Der Stand muss an jedem Tag mit dem Kontoauszug übereinstimmen."),
   seed("2900", "Gezeichnetes Kapital", "equity", "equity", "Das im Gesellschaftsvertrag vereinbarte Stammkapital der Gesellschaft."),
+  seed(
+    "2970",
+    "Gewinnvortrag vor Verwendung",
+    "equity",
+    "equity",
+    "Gewinne und Verluste früherer Jahre, solange die Gesellschafter nicht über ihre Verwendung entschieden haben. Die Summen- und Saldenliste trägt das Ergebnis der Vorjahre hier vor.",
+  ),
   seed("3300", "Verbindlichkeiten aus Lieferungen und Leistungen", "liability", "open_items", "Rechnungen, die Sie erhalten und noch nicht bezahlt haben.", true),
   seed("3500", "Sonstige Verbindlichkeiten", "liability", "other", "Schulden, die zu keinem anderen Konto passen, zum Beispiel gegenüber einer Behörde."),
   seed(

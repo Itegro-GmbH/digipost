@@ -1,7 +1,7 @@
 // `expandTaxLines`: tax lines from base lines, on the real Itegro cases (decisions/0080).
 import { describe, expect, it } from "vitest";
 
-import { expandTaxLines, isBalanced, lineDifference, taxFromGross, taxFromNet, TAX_CODE_DEFINITIONS, TAX_CODES } from "@/modules/ledger";
+import { expandTaxLines, isBalanced, printedTaxIgnored, lineDifference, taxFromGross, taxFromNet, TAX_CODE_DEFINITIONS, TAX_CODES } from "@/modules/ledger";
 
 describe("taxFromGross / taxFromNet", () => {
   it("rounds to the nearest cent in integer arithmetic", () => {
@@ -115,6 +115,18 @@ describe("expandTaxLines", () => {
     expect(lines).toHaveLength(3);
     expect(lines.filter((line) => line.taxRole === "tax")).toHaveLength(0);
     expect(isBalanced(lines)).toBe(true);
+  });
+
+  it("ignores a printed tax that would leave no base on a gross amount, and says so", () => {
+    const line = { accountNumber: "6810", amountCents: 119, taxCode: "vst19" as const, taxCents: 119 };
+    expect(expandTaxLines([line]).map((expanded) => [expanded.accountNumber, expanded.amountCents])).toEqual([
+      ["6810", 100],
+      ["1406", 19],
+    ]);
+    expect(printedTaxIgnored([line])).toBe(true);
+    expect(printedTaxIgnored([{ ...line, taxCents: 19 }])).toBe(false);
+    // On a net amount the printed tax comes on top, the base stays.
+    expect(printedTaxIgnored([{ ...line, amountMode: "net" as const }])).toBe(false);
   });
 
   it("numbers positions from 1 with each tax line right after its base line", () => {

@@ -6,6 +6,7 @@ export * from "./core/types";
 export {
   debitTotal,
   expandTaxLines,
+  printedTaxIgnored,
   isBalanced,
   lineDifference,
   TAX_ACCOUNT_KENNZAHLEN,
@@ -40,6 +41,8 @@ export {
   computeBalances,
   computeOpenItems,
   computeVatPreview,
+  priorYearsResult,
+  RETAINED_EARNINGS_ACCOUNT,
   vatKennzahlenOfEntry,
   type AccountSheet,
   type AccountSheetRow,
@@ -74,6 +77,7 @@ export {
 export {
   ADVISOR_PARSE_ERRORS,
   compareWithAdvisor,
+  MAX_ADVISOR_ROWS,
   parseDatevBalanceList,
   parseGermanAmount,
   type AdvisorBalanceRow,
@@ -174,6 +178,8 @@ export {
 } from "./core/proposals";
 export {
   findAutoMatches,
+  MAX_ANCHORS,
+  MAX_SEARCH_STEPS,
   MAX_SUBSET_CANDIDATES,
   MAX_SUBSET_SIZE,
   MAX_SUGGESTIONS,
@@ -201,6 +207,7 @@ export {
   listEntriesFilterSchema,
   matchIdInputSchema,
   MAX_ADVISOR_CSV_LENGTH,
+  MAX_ADVISOR_FILE_BYTES,
   MAX_BULK_ENTRIES,
   MAX_ENTRY_LINES,
   MAX_LINE_AMOUNT_CENTS,

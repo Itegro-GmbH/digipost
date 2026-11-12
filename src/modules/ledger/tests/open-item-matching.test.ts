@@ -2,7 +2,7 @@
 // suggested groups, on Itegro's Google Ads and Google Play cases.
 import { describe, expect, it } from "vitest";
 
-import { findAutoMatches, suggestMatchGroups, type OpenItemLine } from "@/modules/ledger";
+import { findAutoMatches, MAX_SUGGESTIONS, suggestMatchGroups, type OpenItemLine } from "@/modules/ledger";
 
 const line = (lineId: string, amountCents: number, documentId: string | null = null, bookingDate = "2026-08-01", accountId = "acc-1462"): OpenItemLine => ({ lineId, accountId, amountCents, documentId, bookingDate });
 
@@ -39,5 +39,44 @@ describe("suggestMatchGroups", () => {
     const parts = [1, 2, 3, 4, 5].map((n) => line(`p${n}`, 100));
     expect(suggestMatchGroups([line("big", -500), ...parts])).toEqual([]);
     expect(suggestMatchGroups([line("big", -500), ...parts], { maxSize: 5 })).toHaveLength(1);
+  });
+});
+
+describe("suggestMatchGroups on a large account", () => {
+  /** A small deterministic generator, so the worst case is the same on every run. */
+  function random(seed: number) {
+    let state = seed;
+    return () => {
+      state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return state / 2_147_483_648;
+    };
+  }
+
+  it("3000 open lines with no combination that settles: finishes well under a second", () => {
+    const next = random(42);
+    const lines: OpenItemLine[] = [];
+    for (let index = 0; index < 1500; index++) {
+      const day = String(1 + (index % 28)).padStart(2, "0");
+      // Large debits no handful of small credits can reach, and small credits: every subset is
+      // searched and none fits.
+      lines.push(line(`d${index}`, 100_000 + Math.floor(next() * 900_000), null, `2026-08-${day}`));
+      lines.push(line(`c${index}`, -(1 + Math.floor(next() * 50)), null, `2026-08-${day}`));
+    }
+    const started = performance.now();
+    const suggestions = suggestMatchGroups(lines);
+    const elapsed = performance.now() - started;
+    expect(suggestions).toEqual([]);
+    expect(elapsed).toBeLessThan(500);
+  });
+
+  it("3000 lines that settle pairwise: stops at the suggestion limit", () => {
+    const lines: OpenItemLine[] = [];
+    for (let index = 0; index < 1500; index++) {
+      lines.push(line(`d${index}`, 1000 + index), line(`c${index}`, -(1000 + index)));
+    }
+    const started = performance.now();
+    const suggestions = suggestMatchGroups(lines);
+    expect(performance.now() - started).toBeLessThan(500);
+    expect(suggestions).toHaveLength(MAX_SUGGESTIONS);
   });
 });

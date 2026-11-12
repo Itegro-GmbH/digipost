@@ -57,6 +57,24 @@ function yearStartOf(isoDate: string): string {
   return `${isoDate.slice(0, 4)}-01-01`;
 }
 
+/** SKR 04 "Gewinnvortrag vor Verwendung": where a list starting in a later year carries the
+ * result of the earlier years (their revenue and expense lines), so its openings still add up to
+ * zero. In the seed chart; a synthetic row stands in when a workspace's chart lacks it. */
+export const RETAINED_EARNINGS_ACCOUNT = { number: "2970", name: "Gewinnvortrag vor Verwendung" } as const;
+
+/** The result of every year before the one `from` lies in: the sum of the revenue and expense
+ * lines booked before that year's start (negative is a profit, as on a credit-normal account). */
+export function priorYearsResult(kindOf: (accountId: string) => LedgerAccountKind | undefined, lines: readonly ReportLine[], from: string): number {
+  const start = yearStartOf(from);
+  let result = 0;
+  for (const line of lines) {
+    if (line.bookingDate >= start) continue;
+    const kind = kindOf(line.accountId);
+    if (kind && !carriesBalanceForward(kind)) result += line.amountCents;
+  }
+  return result;
+}
+
 /** Whether a line before `from` counts toward the account's opening balance. */
 function countsTowardOpening(kind: LedgerAccountKind, bookingDate: string, from: string): boolean {
   if (bookingDate >= from) return false;
@@ -101,8 +119,19 @@ export function computeBalances(accounts: readonly ReportAccount[], lines: reado
     acc.set(account.id, entry);
   }
 
+  // Revenue and expense accounts restart every year; their earlier result opens on 2970.
+  const carried = priorYearsResult((id) => byId.get(id)?.kind, lines, period.from);
+  const retained = accounts.find((account) => account.number === RETAINED_EARNINGS_ACCOUNT.number);
+  const listed = retained ? accounts : [...accounts, { id: `synthetic:${RETAINED_EARNINGS_ACCOUNT.number}`, number: RETAINED_EARNINGS_ACCOUNT.number, name: RETAINED_EARNINGS_ACCOUNT.name, kind: "equity" as const, group: "equity" as const, openItems: false }];
+  if (carried !== 0) {
+    const id = retained?.id ?? `synthetic:${RETAINED_EARNINGS_ACCOUNT.number}`;
+    const entry = acc.get(id) ?? { opening: 0, debit: 0, credit: 0 };
+    entry.opening += carried;
+    acc.set(id, entry);
+  }
+
   const rows: BalanceRow[] = [];
-  for (const account of accounts) {
+  for (const account of listed) {
     const values = acc.get(account.id);
     if (!values) continue;
     const closing = values.opening + values.debit - values.credit;
@@ -176,7 +205,7 @@ function compareLines(a: ReportLine, b: ReportLine): number {
  * every entry touching the account (the counter accounts come from them). Lines of proposals
  * (`proposed`) are listed but leave the balance and the sums alone unless `countProposals`.
  */
-export function computeAccountSheet(account: ReportAccount, lines: readonly ReportLine[], period: Period, options: { countProposals?: boolean } = {}): AccountSheet {
+export function computeAccountSheet(account: ReportAccount, lines: readonly ReportLine[], period: Period, options: { countProposals?: boolean; carriedResultCents?: number } = {}): AccountSheet {
   const counts = (line: ReportLine) => !line.proposed || options.countProposals === true;
   const byEntry = new Map<string, ReportLine[]>();
   for (const line of lines) {
@@ -185,7 +214,8 @@ export function computeAccountSheet(account: ReportAccount, lines: readonly Repo
     byEntry.set(line.entryId, list);
   }
 
-  let opening = 0;
+  // 2970 opens with the earlier years' result, like its row in the Summen- und Saldenliste.
+  let opening = account.number === RETAINED_EARNINGS_ACCOUNT.number ? (options.carriedResultCents ?? 0) : 0;
   const inPeriod: ReportLine[] = [];
   for (const line of lines) {
     if (line.accountId !== account.id || line.bookingDate > period.to) continue;
@@ -252,8 +282,10 @@ export function computeOpenItems(accountId: string, lines: readonly ReportLine[]
   const matched = new Set<string>();
   const views: OpenItemMatchView[] = [];
   for (const match of matches) {
+    // A match settles its lines only from the day its last line is booked: before that, every
+    // line of it is still open.
     const matchLines = match.lineIds.map((id) => byId.get(id)).filter((line): line is ReportLine => line !== undefined);
-    if (matchLines.length === 0) continue;
+    if (matchLines.length === 0 || matchLines.length !== match.lineIds.length) continue;
     for (const line of matchLines) matched.add(line.lineId);
     views.push({ id: match.id, kind: match.kind, note: match.note, sumCents: matchLines.reduce((s, l) => s + l.amountCents, 0), lines: matchLines });
   }

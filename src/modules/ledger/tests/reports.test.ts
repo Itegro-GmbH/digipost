@@ -78,6 +78,35 @@ describe("computeBalances", () => {
     expect(list.rows.find((row) => row.number === "1800")?.openingCents).toBe(-1000);
   });
 
+  it("carries the prior years' result into 2970 Gewinnvortrag, so the openings sum to zero", () => {
+    const revenue = entry("2026-07-15", [
+      { accountNumber: "1800", amountCents: 50_000 },
+      { accountNumber: "4400", amountCents: -50_000 },
+    ]);
+    const cost = entry("2026-08-15", [
+      { accountNumber: "6810", amountCents: 12_000 },
+      { accountNumber: "1800", amountCents: -12_000 },
+    ]);
+    const nextYear = entry("2027-02-01", [
+      { accountNumber: "6810", amountCents: 1_000 },
+      { accountNumber: "1800", amountCents: -1_000 },
+    ]);
+    const lines = [...shareCapital, ...revenue, ...cost, ...nextYear];
+    const list = computeBalances(accounts, lines, { from: "2027-01-01", to: "2027-12-31" });
+    const byNumber = new Map(list.rows.map((row) => [row.number, row]));
+    expect(byNumber.get("2970")).toMatchObject({ accountId: "acc-2970", name: "Gewinnvortrag vor Verwendung", openingCents: -38_000, debitCents: 0, creditCents: 0, closingCents: -38_000 });
+    expect(byNumber.get("4400")).toBeUndefined();
+    expect(byNumber.get("6810")).toMatchObject({ openingCents: 0, debitCents: 1_000 });
+    expect(list.totals.openingCents).toBe(0);
+    expect(list.totals.closingCents).toBe(0);
+    // Inside 2026 nothing is carried yet.
+    expect(computeBalances(accounts, lines, { from: "2026-09-01", to: "2026-12-31" }).rows.find((row) => row.number === "2970")).toBeUndefined();
+    // Without 2970 in the chart the row is still there, so the list stays balanced.
+    const without = computeBalances(accounts.filter((account) => account.number !== "2970"), lines, { from: "2027-01-01", to: "2027-12-31" });
+    expect(without.rows.find((row) => row.number === "2970")?.openingCents).toBe(-38_000);
+    expect(without.totals.openingCents).toBe(0);
+  });
+
   it("counts an expense from earlier in the same year toward the opening", () => {
     const list = computeBalances(accounts, ionos, { from: "2026-08-01", to: "2026-08-31" });
     expect(list.rows.find((row) => row.number === "6810")?.openingCents).toBe(126);
@@ -156,6 +185,25 @@ describe("computeOpenItems", () => {
     const matched = computeOpenItems(google.id, lines, [{ id: "m", kind: "match", note: null, lineIds: ids }], "2026-08-31");
     expect(matched.unmatched).toHaveLength(0);
     expect(matched.matches[0]!.sumCents).toBe(0);
+  });
+
+  it("a match counts at a date only when all its lines are on or before that date", () => {
+    const charge = entry("2026-08-19", [
+      { accountNumber: "1462", amountCents: 5000 },
+      { accountNumber: "1800", amountCents: -5000 },
+    ]);
+    const invoice = entry("2026-09-03", [
+      { accountNumber: "6600", amountCents: 5000, taxCode: "rc13b" },
+      { accountNumber: "1462", amountCents: -5000 },
+    ]);
+    const google = accountByNumber.get("1462")!;
+    const lines = [...charge, ...invoice];
+    const ids = lines.filter((line) => line.accountId === google.id).map((line) => line.lineId);
+    const match = [{ id: "m", kind: "match" as const, note: null, lineIds: ids }];
+    const august = computeOpenItems(google.id, lines, match, "2026-08-31");
+    expect(august).toMatchObject({ balanceCents: 5000, status: "open", unmatchedSumCents: 5000, matches: [] });
+    expect(august.unmatched.map((line) => line.lineId)).toEqual([ids[0]]);
+    expect(computeOpenItems(google.id, lines, match, "2026-09-30")).toMatchObject({ status: "zero", unmatched: [] });
   });
 
   it("notary paid by the shareholder, refunded by bank: the shareholder account settles", () => {

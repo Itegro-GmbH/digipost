@@ -1,7 +1,7 @@
 // The DATEV Summen- und Saldenliste parser and the comparison with the ledger.
 import { describe, expect, it } from "vitest";
 
-import { compareWithAdvisor, parseDatevBalanceList, parseGermanAmount } from "@/modules/ledger";
+import { compareWithAdvisor, MAX_ADVISOR_ROWS, parseDatevBalanceList, parseGermanAmount } from "@/modules/ledger";
 
 // A realistic DATEV Kanzlei-Rechnungswesen export: a preamble, a header with the month's and the
 // cumulative values, "S"/"H" indicator columns, German numbers, a sum line at the end.
@@ -71,6 +71,14 @@ describe("parseDatevBalanceList", () => {
     expect(parseDatevBalanceList("Datum;Betrag\n01.01.2026;5,00")).toEqual({ ok: false, error: "no_header" });
     expect(parseDatevBalanceList("Konto;Beschriftung\n1800;Bank")).toEqual({ ok: false, error: "no_balance_column" });
     expect(parseDatevBalanceList("Konto;Saldo\nSumme;0,00")).toEqual({ ok: false, error: "no_rows" });
+  });
+
+  it("refuses more rows than a balance list has, and an amount a Postgres integer cannot hold", () => {
+    const rows = Array.from({ length: MAX_ADVISOR_ROWS + 1 }, (_, index) => `${100_000 + index};1,00`).join("\n");
+    expect(parseDatevBalanceList(`Konto;Saldo\n${rows}`)).toEqual({ ok: false, error: "too_many_rows" });
+    expect(parseDatevBalanceList("Konto;Saldo\n1800;21.474.836,48")).toEqual({ ok: false, error: "amount_too_large" });
+    expect(parseDatevBalanceList("Konto;Saldo\n1800;99999999999999999999,00")).toEqual({ ok: false, error: "amount_too_large" });
+    expect(parseDatevBalanceList("Konto;Saldo\n1800;21.474.836,47 H")).toMatchObject({ ok: true, rows: [{ balanceCents: -2_147_483_647 }] });
   });
 });
 

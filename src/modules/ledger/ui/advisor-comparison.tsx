@@ -11,6 +11,7 @@ import { Button, cn, Input, Label } from "@/shared/ui-primitives";
 import { deleteAdvisorUploadAction, uploadAdvisorBalancesAction } from "../actions";
 import type { AdvisorComparisonRow } from "../core/advisor";
 import type { LedgerActionErrorCode } from "../core/error-codes";
+import { MAX_ADVISOR_FILE_BYTES } from "../core/schemas";
 import type { AccountSheetRow } from "../core/reports";
 import type { AdvisorUploadView } from "../core/types";
 import { formatCents, formatSaldo, formatShortDate, formatTimestamp } from "./format";
@@ -44,6 +45,11 @@ export function AdvisorUploadForm({ defaultFrom, defaultTo }: { defaultFrom: str
     event.preventDefault();
     if (!file) return;
     setErrorCode(null);
+    // Larger than any real balance list, and more than a Server Action may carry.
+    if (file.size > MAX_ADVISOR_FILE_BYTES) {
+      setErrorCode("advisor_file_invalid");
+      return;
+    }
     startTransition(async () => {
       let csvText: string;
       try {
