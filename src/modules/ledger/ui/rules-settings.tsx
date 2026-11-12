@@ -10,8 +10,8 @@ import { Button, cn, Input, Label } from "@/shared/ui-primitives";
 
 import { createBookingRuleAction, deleteBookingRuleAction, updateBookingRuleAction } from "../actions";
 import type { LedgerActionErrorCode } from "../core/error-codes";
-import type { RuleInput } from "../core/schemas";
-import { BOOKING_RULE_DIRECTIONS, LEDGER_ACCOUNT_GROUPS, TAX_CODES, type BookingRuleDirection, type BookingRuleView, type LedgerAccountView, type TaxCode } from "../core/types";
+import { RULE_TAX_CODES_BY_DIRECTION, ruleTaxCodeFits, type RuleInput } from "../core/schemas";
+import { BOOKING_RULE_DIRECTIONS, LEDGER_ACCOUNT_GROUPS, type BookingRuleDirection, type BookingRuleView, type LedgerAccountView, type TaxCode } from "../core/types";
 import { AccountTag } from "./account-tag";
 import { PILL_CLASSES, SELECT_CLASSES } from "./format";
 
@@ -99,7 +99,14 @@ export function RuleForm({ rule, accounts, contacts, onDone }: { rule: BookingRu
   const id = rule ? `rule-${rule.id}` : "rule-new";
 
   const missingWho = contactId === "" && pattern.trim() === "";
-  const valid = !missingWho && accountNumber !== "";
+  const valid = !missingWho && accountNumber !== "" && ruleTaxCodeFits(direction, taxCode || null);
+
+  /** Input tax only on the expense side, output tax only on the revenue side: a code the new
+   * direction does not allow is dropped. */
+  function changeDirection(next: BookingRuleDirection) {
+    setDirection(next);
+    if (taxCode && !ruleTaxCodeFits(next, taxCode)) setTaxCode("");
+  }
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -144,7 +151,7 @@ export function RuleForm({ rule, accounts, contacts, onDone }: { rule: BookingRu
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="flex flex-col gap-1">
           <Label htmlFor={`${id}-direction`}>{t("rules.direction")}</Label>
-          <select id={`${id}-direction`} value={direction} onChange={(event) => setDirection(event.target.value as BookingRuleDirection)} className={SELECT_CLASSES}>
+          <select id={`${id}-direction`} value={direction} onChange={(event) => changeDirection(event.target.value as BookingRuleDirection)} className={SELECT_CLASSES}>
             {BOOKING_RULE_DIRECTIONS.map((value) => (
               <option key={value} value={value}>
                 {t(`ruleDirections.${value}`)}
@@ -160,7 +167,7 @@ export function RuleForm({ rule, accounts, contacts, onDone }: { rule: BookingRu
           <Label htmlFor={`${id}-tax`}>{t("rules.taxCode")}</Label>
           <select id={`${id}-tax`} value={taxCode} onChange={(event) => setTaxCode(event.target.value as TaxCode | "")} className={SELECT_CLASSES}>
             <option value="">{t("rules.noTax")}</option>
-            {TAX_CODES.map((code) => (
+            {RULE_TAX_CODES_BY_DIRECTION[direction].map((code) => (
               <option key={code} value={code}>
                 {t(`taxCodes.${code}.label`)}
               </option>

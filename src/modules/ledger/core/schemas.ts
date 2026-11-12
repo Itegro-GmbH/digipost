@@ -19,6 +19,8 @@ import {
   TAX_CODES,
   VAT_BASES,
   VAT_PERIODS,
+  type BookingRuleDirection,
+  type TaxCode,
 } from "./types";
 
 export const MAX_ENTRY_LINES = 100;
@@ -163,6 +165,18 @@ export const createMatchInputSchema = z
 export type CreateMatchInput = z.infer<typeof createMatchInputSchema>;
 export const matchIdInputSchema = z.object({ matchId: z.uuid() });
 
+/** The tax codes a rule may propose, by its direction: input tax and § 13b only on the expense
+ * side, output tax only on the revenue side, and a rule for both only a code without tax. */
+export const RULE_TAX_CODES_BY_DIRECTION = {
+  incoming: ["vst19", "vst7", "rc13b", "pass_through", "not_taxable", "tax_free"],
+  outgoing: ["ust19", "ust7", "eu_not_taxable", "not_taxable", "tax_free"],
+  any: ["not_taxable", "tax_free"],
+} as const satisfies Record<BookingRuleDirection, readonly TaxCode[]>;
+
+export function ruleTaxCodeFits(direction: BookingRuleDirection, taxCode: TaxCode | null): boolean {
+  return taxCode === null || (RULE_TAX_CODES_BY_DIRECTION[direction] as readonly TaxCode[]).includes(taxCode);
+}
+
 export const ruleInputSchema = z
   .object({
     contactId: z.uuid().nullable(),
@@ -175,7 +189,8 @@ export const ruleInputSchema = z
     active: z.boolean().default(true),
     learnedFromEntryId: z.uuid().nullable().optional(),
   })
-  .refine((value) => value.contactId !== null || (value.counterpartyPattern ?? "").length > 0, { path: ["counterpartyPattern"] });
+  .refine((value) => value.contactId !== null || (value.counterpartyPattern ?? "").length > 0, { path: ["counterpartyPattern"] })
+  .refine((value) => ruleTaxCodeFits(value.direction, value.taxCode), { path: ["taxCode"] });
 export type RuleInput = z.infer<typeof ruleInputSchema>;
 export const updateRuleInputSchema = z.object({ ruleId: z.uuid(), rule: ruleInputSchema });
 export const ruleIdInputSchema = z.object({ ruleId: z.uuid() });

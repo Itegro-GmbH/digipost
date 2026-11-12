@@ -560,7 +560,7 @@ describe("buildProposals: bank transactions", () => {
   it("share capital via a no-document rule (wins over the shareholder's own account)", async () => {
     const result = await plan(
       snapshot({
-        rules: [{ id: "rule-capital", contactId: null, counterpartyPattern: "luca schackmann", direction: "incoming", accountNumber: "2900", taxCode: null, paymentAccountNumber: null, noDocument: true }],
+        rules: [{ id: "rule-capital", contactId: null, counterpartyPattern: "luca schackmann", direction: "outgoing", accountNumber: "2900", taxCode: null, paymentAccountNumber: null, noDocument: true }],
         transactions: [tx("capital", 416_700, { counterpartyName: "Luca Schackmann", remittanceText: "Stammeinlage" })],
       }),
     );
@@ -606,5 +606,123 @@ describe("buildProposals: bank transactions", () => {
     );
     expect(result.drafts.length).toBe(3);
     for (const draft of result.drafts) expect(isBalanced(expandTaxLines(draft.entry.lines))).toBe(true);
+  });
+});
+
+describe("buildProposals: fixes from the acceptance replay and the review", () => {
+  it("A1: a rule pattern matches the remittance text too, and the rule wins over the shareholder's own account", async () => {
+    const result = await plan(
+      snapshot({
+        rules: [{ id: "rule-stammeinlage", contactId: null, counterpartyPattern: "stammeinlage", direction: "any", accountNumber: "2900", taxCode: null, paymentAccountNumber: null, noDocument: true }],
+        transactions: [
+          tx("luca", 833_400, { bookingDate: "2026-06-01", counterpartyName: "Luca Schackmann", remittanceText: "Stammeinlage Luca Schackmann" }),
+          tx("lukas", 833_300, { bookingDate: "2026-06-01", counterpartyName: "Lukas Laschinger", remittanceText: "Stammeinlage Lukas Laschinger" }),
+          tx("vincent", 833_300, { bookingDate: "2026-06-01", counterpartyName: "Vincent Helmers", remittanceText: "Stammeinlage Vincent Helmers" }),
+        ],
+      }),
+    );
+    for (const [id, cents] of [["luca", 833_400], ["lukas", 833_300], ["vincent", 833_300]] as const) {
+      const draft = draftFor(result, `tx:${id}`);
+      expect(draft).toMatchObject({ origin: "rule", originReason: "rule:rule-stammeinlage" });
+      expect(booked(draft)).toEqual([
+        ["1800", cents, null, null],
+        ["2900", -cents, null, null],
+      ]);
+    }
+    expect(result.unproposed).toEqual([]);
+  });
+
+  it("A2: a payment matched to a document without an open-item account falls back to the contact's own account", async () => {
+    const settlement = doc("meta-x6", { kind: "platform_settlement", direction: "unknown", platform: null, invoiceNumber: "X6TUJ3AHS4", totalAmountCents: 10_000, contactId: META, contactName: "Meta" });
+    const result = await plan(
+      snapshot({
+        documents: [{ ...settlement, confirmedTransactions: [{ transactionId: "topup", allocatedAmountCents: 10_000 }] }],
+        transactions: [tx("topup", -10_000, { counterpartyName: "Meta Platforms Ireland", resolvedContactId: META })],
+      }),
+    );
+    expect(booked(draftFor(result, "tx:topup"))).toEqual([
+      ["1800", -10_000, null, null],
+      ["1461", 10_000, null, null],
+    ]);
+  });
+
+  it("B8: a full cancellation of 0,50 at 19 % plus 1,50 at 7 % nets every tax account to zero", async () => {
+    const lines = [
+      { quantity: "1", unitPrice: "0.50", category: "S", ratePercent: 19 },
+      { quantity: "1", unitPrice: "1.50", category: "S", ratePercent: 7 },
+    ];
+    const negated = lines.map((line) => ({ ...line, quantity: "-1" }));
+    const result = await plan(
+      snapshot({
+        invoices: [
+          { id: "inv", number: "RE-1", type: "invoice", issueDate: "2026-07-10", serviceDate: null, contactId: null, buyerName: "Kunde GmbH", buyerCountry: "DE", documentId: null, groups: invoiceVatGroups(lines, { netCents: 200, vatCents: 21 }) },
+          // The stored totals of the cancellation as the invoicing module rounds them.
+          { id: "storno", number: "RE-2", type: "cancellation", cancelsInvoiceId: "inv", issueDate: "2026-07-11", serviceDate: null, contactId: null, buyerName: "Kunde GmbH", buyerCountry: "DE", documentId: null, groups: invoiceVatGroups(negated, { netCents: -200, vatCents: -19 }) },
+        ],
+      }),
+    );
+    const sums = new Map<string, number>();
+    for (const key of ["invoice:inv", "invoice:storno"]) for (const [account, cents] of booked(draftFor(result, key))) sums.set(account, (sums.get(account) ?? 0) + cents);
+    expect(Object.fromEntries(sums)).toEqual({ "1200": 0, "4400": 0, "4300": 0, "3806": 0, "3801": 0 });
+  });
+
+  it("B8: invoiceVatGroups rounds half away from zero, so a negated invoice gives the negated groups", () => {
+    const positive = invoiceVatGroups([{ quantity: "1", unitPrice: "0.50", category: "S", ratePercent: 19 }], { netCents: 50, vatCents: 10 });
+    const negative = invoiceVatGroups([{ quantity: "-1", unitPrice: "0.50", category: "S", ratePercent: 19 }], { netCents: -50, vatCents: -10 });
+    expect(negative).toEqual(positive.map((group) => ({ ...group, netCents: -group.netCents, vatCents: -group.vatCents })));
+  });
+
+  it("B9: only Apple and Google reports get the commissionaire template; Stripe gets no proposal and a problem code", async () => {
+    const result = await plan(
+      snapshot({
+        accounts: [...itegroChart(), account("1372", "Forderung Stripe", { ownerType: "platform", ownerPlatform: "stripe" })],
+        documents: [doc("stripe-07", { kind: "platform_settlement", direction: "unknown", platform: "stripe", totalAmountCents: null, servicePeriodTo: "2026-07-31" })],
+        settlementLines: [
+          { id: "s1", documentId: "stripe-07", platform: "stripe", type: "revenue", grossCents: 5000, feeCents: null, netCents: null, bookingDate: "2026-07-15" },
+          { id: "s2", documentId: "stripe-07", platform: "stripe", type: "fee", grossCents: null, feeCents: -150, netCents: null, bookingDate: "2026-07-15" },
+        ],
+      }),
+    );
+    expect(result.drafts.map((draft) => draft.sourceKey)).toEqual([]);
+    expect(result.unproposed).toEqual(["settlement:stripe-07:2026-07"]);
+    expect(result.problems).toEqual([{ sourceKey: "settlement:stripe-07:2026-07", code: "unsupported_platform_settlement" }]);
+  });
+
+  it("B10: a document rule never books a refund; a no-document rule applies only in its money direction", async () => {
+    const result = await plan(
+      snapshot({
+        accounts: itegroChart().filter((entry) => entry.number !== "1461"),
+        rules: [
+          { id: "rule-meta", contactId: META, counterpartyPattern: null, direction: "incoming", accountNumber: "6600", taxCode: "rc13b", paymentAccountNumber: null, noDocument: false },
+          { id: "rule-fees", contactId: null, counterpartyPattern: "finom", direction: "incoming", accountNumber: "6855", taxCode: null, paymentAccountNumber: null, noDocument: true },
+        ],
+        transactions: [
+          // A refund from Meta (money in), whose counterparty needs no document.
+          tx("refund", 2_500, { counterpartyName: "Meta Platforms Ireland", resolvedContactId: META, noDocumentRule: true }),
+          // Finom's fee (money out) and a Finom credit (money in).
+          tx("fee", -990, { counterpartyName: "Finom", remittanceText: "Kontoführung" }),
+          tx("credit", 500, { counterpartyName: "Finom", remittanceText: "Gutschrift" }),
+        ],
+      }),
+    );
+    expect(result.drafts.map((draft) => draft.sourceKey)).toEqual(["tx:fee"]);
+    expect(draftFor(result, "tx:fee")).toMatchObject({ originReason: "rule:rule-fees" });
+    expect(result.unproposed.sort()).toEqual(["tx:credit", "tx:refund"]);
+  });
+
+  it("B12: a domestic supplier printing German VAT and a reverse-charge note is booked as printed, with a warning", async () => {
+    const result = await plan(
+      snapshot({
+        rules: [{ id: "rule-ionos", contactId: IONOS, counterpartyPattern: null, direction: "incoming", accountNumber: "6810", taxCode: null, paymentAccountNumber: null, noDocument: false }],
+        documents: [doc("dom", { contactId: IONOS, contactName: "IONOS SE", contactCountry: "DE", contactVatId: "DE123456789", reverseCharge: true, totalAmountCents: 11_900, taxBreakdown: [{ ratePercent: 19, netCents: 10_000, taxCents: 1_900 }] })],
+      }),
+    );
+    const draft = draftFor(result, "doc:dom");
+    expect(draft.warnings).toContain("reverse_charge_conflict");
+    expect(booked(draft)).toEqual([
+      ["6810", 10_000, "vst19", null],
+      ["1406", 1_900, "vst19", null],
+      ["3300", -11_900, null, "dom"],
+    ]);
   });
 });

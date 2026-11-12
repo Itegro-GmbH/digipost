@@ -1,6 +1,7 @@
 // "Als Regel speichern" (decisions/0080 phase 3): the booking rule a booked or edited entry
 // implies, so the same contact or counterparty is proposed the same way next time without the
 // AI. Pure; `learnRuleFromEntry` resolves the contact and writes the rule.
+import { moneyDirection } from "./proposals";
 import type { RuleInput } from "./schemas";
 import type { LedgerAccountGroup, LedgerAccountKind, LedgerOwnerType, TaxCode, TaxRole } from "./types";
 
@@ -74,7 +75,9 @@ export function deriveRuleFromEntry(input: RuleLearningInput): RuleInput | null 
   return {
     contactId: input.contactId,
     counterpartyPattern: pattern,
-    direction: bank[0]!.amountCents > 0 ? "incoming" : "outgoing",
+    // Money in is the revenue side (`outgoing`), money out the expense side (`incoming`), the
+    // same reading `ruleForTransaction` applies.
+    direction: moneyDirection(bank[0]!.amountCents),
     accountNumber: main.accountNumber,
     taxCode: main.taxCode,
     paymentAccountNumber: null,

@@ -93,8 +93,14 @@ export const PROPOSAL_WARNING_CODES = [
   "foreign_supplier_with_vat",
   "duplicate_suspect",
   "ai_unavailable",
+  "reverse_charge_conflict",
 ] as const;
 export type ProposalWarningCode = (typeof PROPOSAL_WARNING_CODES)[number];
+
+/** Why a source got no proposal, when that is worth telling (shown after "Vorschläge
+ * aktualisieren"): a settlement report of a platform the template does not book. */
+export const PROPOSAL_PROBLEM_CODES = ["unsupported_platform_settlement"] as const;
+export type ProposalProblemCode = (typeof PROPOSAL_PROBLEM_CODES)[number];
 
 /** USt-VA fields ("Kennzahlen") the preview fills. 83 is the resulting Zahllast. */
 export const VAT_KENNZAHLEN = ["81", "86", "21", "46", "47", "66", "67", "83"] as const;
@@ -343,6 +349,8 @@ export type SyncProposalsResult = {
   failed: number;
   /** Sources with no safe proposal (an unexplained bank transaction, a document without amount). */
   unproposed: number;
+  /** The unproposed sources with a reason worth telling, by source key. */
+  problems: { sourceKey: string; code: ProposalProblemCode }[];
   /** Documents left for the next run because this run's AI budget was used up. */
   deferred: number;
   aiAsked: number;

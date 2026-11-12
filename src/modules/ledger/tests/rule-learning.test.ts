@@ -46,7 +46,7 @@ describe("deriveRuleFromEntry", () => {
       counterpartyName: "Luca  Schackmann",
       lines: [l("1800", 416_700, { kind: "asset", group: "bank", ownerType: "bank_account" }), l("2900", -416_700, { kind: "equity", group: "equity" })],
     });
-    expect(rule).toMatchObject({ contactId: null, counterpartyPattern: "luca schackmann", direction: "incoming", accountNumber: "2900", noDocument: true });
+    expect(rule).toMatchObject({ contactId: null, counterpartyPattern: "luca schackmann", direction: "outgoing", accountNumber: "2900", noDocument: true });
   });
 
   it("no rule for a transaction split over several accounts or without a counterparty", () => {

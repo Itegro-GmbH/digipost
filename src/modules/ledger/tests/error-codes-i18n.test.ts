@@ -23,6 +23,7 @@ import {
   OPEN_ITEM_MATCH_KINDS,
   PERIOD_STATUSES,
   PROPOSAL_TEMPLATES,
+  PROPOSAL_PROBLEM_CODES,
   PROPOSAL_WARNING_CODES,
   REVISION_CHANGE_KINDS,
   TAX_CODES,
@@ -60,6 +61,7 @@ describe("Ledger messages", () => {
   it.each(VAT_BASES)("vatBases.%s resolves", (basis) => expect(typeof flat("vatBases")[basis]).toBe("string"));
   it.each(PERIOD_STATUSES)("periodStatus.%s resolves", (status) => expect(typeof flat("periodStatus")[status]).toBe("string"));
   it.each(PROPOSAL_WARNING_CODES)("warnings.%s resolves", (code) => expect(typeof flat("warnings")[code]).toBe("string"));
+  it.each(PROPOSAL_PROBLEM_CODES)("problems.%s resolves", (code) => expect(typeof flat("problems")[code]).toBe("string"));
   it.each(CONTROL_STATUSES)("controlStatuses.%s resolves", (status) => expect(typeof flat("controlStatuses")[status]).toBe("string"));
   it.each(CONTROL_IDS)("controls.%s has a title", (id) => expect(typeof (flat("controls")[id] as Record<string, unknown>).title).toBe("string"));
   it.each(ENTRY_SUMMARY_KINDS)("summaries.%s resolves", (kind) => expect(typeof flat("summaries")[kind]).toBe("string"));

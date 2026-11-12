@@ -25,6 +25,7 @@ import type {
   LedgerAccountGroup,
   LedgerAccountKind,
   LedgerOwnerType,
+  ProposalProblemCode,
   ProposalTemplate,
   ProposalWarningCode,
   TaxCode,
@@ -51,8 +52,11 @@ export type ProposalAccount = {
 export type ProposalRule = {
   id: string;
   contactId: string | null;
-  /** Lowercase; matches when the counterparty's name contains it. */
+  /** Lowercase; matches when the counterparty's name (or a bank transaction's remittance text)
+   * contains it. */
   counterpartyPattern: string | null;
+  /** The side the rule books: `incoming` an expense (an incoming invoice, money out),
+   * `outgoing` a revenue (an outgoing invoice, money in), `any` both. */
   direction: BookingRuleDirection;
   accountNumber: string;
   taxCode: TaxCode | null;
@@ -144,6 +148,9 @@ export type ProposalInvoice = {
   buyerCountry: string | null;
   /** The inbox document the invoice was filed as: payments are matched against it. */
   documentId: string | null;
+  /** A cancellation: the invoice it cancels (its groups are negated, so every account nets to
+   * zero whatever the cancellation's own rounding). */
+  cancelsInvoiceId?: string | null;
   groups: ProposalInvoiceGroup[];
 };
 
@@ -180,6 +187,8 @@ export type ProposalPlan = {
   drafts: ProposalDraft[];
   /** Sources no template explains (they show as problems). */
   unproposed: string[];
+  /** Unproposed sources with a reason worth telling (a subset of `unproposed`). */
+  problems: { sourceKey: string; code: ProposalProblemCode }[];
   /** Documents whose AI answer is missing from the advice map (asked next run). */
   deferred: string[];
 };
@@ -211,6 +220,12 @@ const AUTHORITY_KEYWORDS = ["gericht", "finanzamt", "behörde", "stadtkasse", "g
 
 /** Fee lines of a platform report: Google bills its service fee from Ireland (§ 13b). */
 const PLATFORM_FEE_TAX_CODES: Record<string, TaxCode | null> = { google: "rc13b" };
+
+/** Platforms whose report the settlement template books: the app stores, which sell in their own
+ * name on the developer's account (commissionaire model), so the revenue is a supply to the
+ * store (4339). Other platforms (Stripe, PayPal, Amazon) collect for the seller; their reports
+ * need a different booking and get no proposal. */
+const COMMISSIONAIRE_PLATFORMS = new Set(["apple", "google"]);
 
 export const MAX_ENTRY_TEXT = 200;
 
@@ -257,6 +272,12 @@ function normalizeIban(iban: string | null | undefined): string | null {
 
 export function isEuCountry(country: string | null | undefined): boolean {
   return Boolean(country && EU_COUNTRIES.has(country.toUpperCase()));
+}
+
+/** A German supplier: its contact's country is DE, or its VAT id is German. */
+export function isDomesticParty(country: string | null, vatId: string | null): boolean {
+  if (country && country.trim().toUpperCase() === "DE") return true;
+  return (vatId ?? "").replace(/\s+/g, "").slice(0, 2).toUpperCase() === "DE";
 }
 
 /** A supplier outside Germany: its contact's country, or a VAT id of another country. */
@@ -319,14 +340,15 @@ function directionFits(rule: ProposalRule, direction: "incoming" | "outgoing"): 
   return rule.direction === "any" || rule.direction === direction;
 }
 
-/** The rule for a contact wins over a name pattern; the first of each in list order. */
-function pickRule(rules: readonly ProposalRule[], contactId: string | null, name: string): ProposalRule | null {
+/** The rule for a contact wins over a name pattern; the first of each in list order. A pattern
+ * matches when any of `texts` contains it. */
+function pickRule(rules: readonly ProposalRule[], contactId: string | null, texts: readonly (string | null)[]): ProposalRule | null {
   if (contactId) {
     const byContact = rules.find((rule) => rule.contactId === contactId);
     if (byContact) return byContact;
   }
-  const text = name.toLowerCase();
-  return rules.find((rule) => rule.contactId === null && rule.counterpartyPattern && text.includes(rule.counterpartyPattern)) ?? null;
+  const lowered = texts.map(lower).filter((text) => text.length > 0);
+  return rules.find((rule) => rule.contactId === null && rule.counterpartyPattern && lowered.some((text) => text.includes(rule.counterpartyPattern!))) ?? null;
 }
 
 /** A document rule: not a no-document rule, direction of the document. */
@@ -334,20 +356,25 @@ export function ruleForDocument(rules: readonly ProposalRule[], doc: ProposalDoc
   return pickRule(
     rules.filter((rule) => !rule.noDocument && directionFits(rule, direction)),
     doc.contactId,
-    [doc.contactName, doc.sender].filter(Boolean).join(" "),
+    [[doc.contactName, doc.sender].filter(Boolean).join(" ")],
   );
 }
 
-/** A rule for a bank transaction without a document: a no-document rule, or any rule of a
- * counterparty that needs no document (`payment_no_document_rules` or the transaction's flag).
- * Direction by money flow: `incoming` is money in. */
+/** The side of the books a bank transaction's money lands on: money in is the revenue side
+ * (`outgoing`, like an outgoing invoice), money out the expense side (`incoming`). */
+export function moneyDirection(amountCents: number): "incoming" | "outgoing" {
+  return amountCents > 0 ? "outgoing" : "incoming";
+}
+
+/** A rule for a bank transaction without a document: only a no-document rule, and only in the
+ * transaction's money direction (a rule learned from a supplier's invoices never books its
+ * refund). The pattern matches the counterparty's name or the remittance text ("Stammeinlage"). */
 export function ruleForTransaction(rules: readonly ProposalRule[], tx: ProposalTransaction): ProposalRule | null {
-  const direction = tx.amountCents > 0 ? "incoming" : "outgoing";
-  const noDocumentCounterparty = tx.noDocumentNeeded || tx.noDocumentRule;
+  const direction = moneyDirection(tx.amountCents);
   return pickRule(
-    rules.filter((rule) => (rule.noDocument || noDocumentCounterparty) && directionFits(rule, direction)),
+    rules.filter((rule) => rule.noDocument && directionFits(rule, direction)),
     tx.resolvedContactId,
-    tx.counterpartyName ?? "",
+    [tx.counterpartyName, tx.remittanceText],
   );
 }
 
@@ -403,6 +430,12 @@ function incomingLines(doc: ProposalDocument, total: number, target: Target, war
   const germanVat = hasGermanVat(doc);
   const text = counterpartyText(doc);
   if (foreign && germanVat && doc.reverseCharge !== true) warnings.add("foreign_supplier_with_vat");
+  const breakdown = usableBreakdown(doc.taxBreakdown ?? [], base);
+  // A German supplier printing German VAT owes that VAT itself: a reverse-charge note (or an OCR
+  // false positive) loses against the printed figures, flagged.
+  const printedVat = breakdown?.some((entry) => entry.taxCents > 0 && (entry.ratePercent === 19 || entry.ratePercent === 7)) ?? false;
+  const reverseChargeConflict = doc.reverseCharge === true && printedVat && !foreign && isDomesticParty(doc.contactCountry, doc.contactVatId);
+  if (reverseChargeConflict) warnings.add("reverse_charge_conflict");
   if (germanVat && pass === 0 && containsAny(text, PASS_THROUGH_KEYWORDS)) warnings.add("possible_pass_through");
 
   const lines: LineInput[] = [];
@@ -412,8 +445,7 @@ function incomingLines(doc: ProposalDocument, total: number, target: Target, war
       ? target.split.map((part) => ({ accountNumber: part.accountNumber, amountCents: part.amountCents, taxCode: code === "rc13b" ? "rc13b" : (part.taxCode ?? code), amountMode: mode }))
       : [{ accountNumber: account, amountCents: base, taxCode: code, amountMode: mode }];
 
-  const breakdown = usableBreakdown(doc.taxBreakdown ?? [], base);
-  if (doc.reverseCharge === true || (foreign && !germanVat)) {
+  if ((doc.reverseCharge === true && !reverseChargeConflict) || (foreign && !germanVat)) {
     lines.push(...splitOr("rc13b"));
   } else if (breakdown) {
     for (const entry of breakdown) {
@@ -485,6 +517,12 @@ function outgoingLines(doc: ProposalDocument, total: number, rule: ProposalRule 
 // Issued invoices
 // ---------------------------------------------------------------------------------------------
 
+/** Commercial rounding, symmetric around zero: a negated amount rounds to the negated result
+ * (`Math.round(-9.5)` is -9, this gives -10). */
+function roundHalfAwayFromZero(value: number): number {
+  return Math.sign(value) * Math.round(Math.abs(value) + Number.EPSILON);
+}
+
 export type InvoiceLineForGroups = { quantity: string | number; unitPrice: string | number; category: string; ratePercent: number };
 
 /**
@@ -495,7 +533,7 @@ export type InvoiceLineForGroups = { quantity: string | number; unitPrice: strin
 export function invoiceVatGroups(lines: readonly InvoiceLineForGroups[], totals: { netCents: number; vatCents: number }): ProposalInvoiceGroup[] {
   const groups = new Map<string, ProposalInvoiceGroup>();
   for (const line of lines) {
-    const net = Math.round(Number(line.quantity) * Number(line.unitPrice) * 100 + Number.EPSILON);
+    const net = roundHalfAwayFromZero(Number(line.quantity) * Number(line.unitPrice) * 100);
     if (!Number.isFinite(net)) continue;
     const key = `${line.category}:${line.ratePercent}`;
     const group = groups.get(key) ?? { category: line.category, ratePercent: line.ratePercent, netCents: 0, vatCents: 0 };
@@ -503,7 +541,7 @@ export function invoiceVatGroups(lines: readonly InvoiceLineForGroups[], totals:
     groups.set(key, group);
   }
   const list = [...groups.values()];
-  for (const group of list) group.vatCents = Math.round((group.netCents * group.ratePercent) / 100);
+  for (const group of list) group.vatCents = roundHalfAwayFromZero((group.netCents * group.ratePercent) / 100);
   if (list.length === 0) return [{ category: totals.vatCents !== 0 ? "S" : "Z", ratePercent: totals.vatCents !== 0 ? 19 : 0, netCents: totals.netCents, vatCents: totals.vatCents }];
   const largest = (candidates: ProposalInvoiceGroup[]) => candidates.reduce((best, group) => (Math.abs(group.netCents) > Math.abs(best.netCents) ? group : best));
   largest(list).netCents += totals.netCents - list.reduce((sum, group) => sum + group.netCents, 0);
@@ -755,11 +793,16 @@ function proposeOutgoingDocuments(ctx: Context, plan: ProposalPlan, duplicates: 
 }
 
 function proposeInvoices(ctx: Context, plan: ProposalPlan): void {
+  const byId = new Map(ctx.snapshot.invoices.map((invoice) => [invoice.id, invoice]));
   for (const invoice of ctx.snapshot.invoices) {
     const key = invoiceSourceKey(invoice.id);
     if (!inScope(ctx.snapshot, invoice.issueDate) || ctx.snapshot.decidedSourceKeys.has(key)) continue;
-    const revenue = invoice.groups.map((group) => invoiceGroupLine(group, invoice.buyerCountry)).filter((line) => line.amountCents !== 0);
-    const gross = invoice.groups.reduce((sum, group) => sum + group.netCents + group.vatCents, 0);
+    // A full cancellation books exactly the cancelled invoice's groups, negated: every revenue and
+    // tax account nets to zero, whatever rounding the cancellation's own totals went through.
+    const original = invoice.type === "cancellation" && invoice.cancelsInvoiceId ? byId.get(invoice.cancelsInvoiceId) : undefined;
+    const groups = original ? original.groups.map((group) => ({ ...group, netCents: -group.netCents, vatCents: -group.vatCents })) : invoice.groups;
+    const revenue = groups.map((group) => invoiceGroupLine(group, invoice.buyerCountry)).filter((line) => line.amountCents !== 0);
+    const gross = groups.reduce((sum, group) => sum + group.netCents + group.vatCents, 0);
     if (gross === 0 || revenue.length === 0) {
       plan.unproposed.push(key);
       continue;
@@ -817,6 +860,11 @@ function proposeSettlements(ctx: Context, plan: ProposalPlan, platformLabel: (pl
     const periodEnd = group.doc?.servicePeriodTo;
     const bookingDate = periodEnd && periodEnd.slice(0, 7) === group.month && periodEnd < end ? periodEnd : end;
     if (!inScope(ctx.snapshot, bookingDate) || ctx.snapshot.decidedSourceKeys.has(key)) continue;
+    if (!group.platform || !COMMISSIONAIRE_PLATFORMS.has(group.platform)) {
+      plan.unproposed.push(key);
+      plan.problems.push({ sourceKey: key, code: "unsupported_platform_settlement" });
+      continue;
+    }
     const receivable = ctx.chart.platformAccount(group.platform);
     if (!receivable) {
       plan.unproposed.push(key);
@@ -865,14 +913,12 @@ function bankCounter(ctx: Context, tx: ProposalTransaction): BankCounter | null 
   const sign = tx.amountCents < 0 ? 1 : -1;
 
   // 1. A confirmed match to one or more documents: their open-item accounts, allocated amounts.
+  // A document whose template has no open-item account (a settlement report of a platform
+  // without a receivable) cannot carry the payment: the rules below decide instead.
   const links = (ctx.linksByTransaction.get(tx.id) ?? []).filter((link) => ctx.documents.has(link.documentId));
-  if (links.length > 0) {
-    const lines: LineInput[] = [];
-    for (const link of links) {
-      const account = openItemAccountForDocument(ctx, ctx.documents.get(link.documentId)!);
-      if (!account) return null;
-      lines.push({ accountNumber: account, amountCents: sign * Math.abs(link.allocatedAmountCents), documentId: link.documentId });
-    }
+  const linkAccounts = links.map((link) => openItemAccountForDocument(ctx, ctx.documents.get(link.documentId)!));
+  if (links.length > 0 && linkAccounts.every((account) => account !== null)) {
+    const lines: LineInput[] = links.map((link, index) => ({ accountNumber: linkAccounts[index]!, amountCents: sign * Math.abs(link.allocatedAmountCents), documentId: link.documentId }));
     const remainder = -tx.amountCents - lines.reduce((sum, line) => sum + line.amountCents, 0);
     const warnings: ProposalWarningCode[] = [];
     if (remainder !== 0) {
@@ -957,7 +1003,7 @@ function proposeTransactions(ctx: Context, plan: ProposalPlan): void {
  */
 export function buildProposals(snapshot: ProposalSnapshot, advice: AdviceMap, platformLabel: (platform: string) => string = (platform) => platform): ProposalPlan {
   const ctx = contextOf(snapshot);
-  const plan: ProposalPlan = { drafts: [], unproposed: [], deferred: [] };
+  const plan: ProposalPlan = { drafts: [], unproposed: [], problems: [], deferred: [] };
   const duplicates = duplicateSuspects(snapshot.documents);
   proposeIncoming(ctx, advice, plan, duplicates);
   proposeOutgoingDocuments(ctx, plan, duplicates);

@@ -24,7 +24,7 @@ function account(number: string, name: string, group: LedgerAccountView["group"]
   return { id: number, number, name, kind: "expense", group, openItems, ownerType: null, ownerBankAccountId: null, ownerContactId: null, ownerPlatform: null, ownerPersonName: null, description: null, archived: false };
 }
 const ACCOUNTS = [account("1800", "Bank", "bank"), account("1461", "Meta", "open_items", true), account("2900", "Gezeichnetes Kapital", "equity"), account("6810", "Internetkosten", "costs")];
-const RULE: BookingRuleView = { id: "r1", contactId: "c-ionos", counterpartyPattern: null, direction: "outgoing", accountNumber: "6810", taxCode: "vst19", paymentAccountNumber: null, noDocument: false, active: true, hits: 4, learnedFromEntryId: "e1" };
+const RULE: BookingRuleView = { id: "r1", contactId: "c-ionos", counterpartyPattern: null, direction: "incoming", accountNumber: "6810", taxCode: "vst19", paymentAccountNumber: null, noDocument: false, active: true, hits: 4, learnedFromEntryId: "e1" };
 
 function renderRules(rules: BookingRuleView[] = [RULE]) {
   return render(
@@ -78,6 +78,22 @@ describe("RulesSettings", () => {
       active: true,
       learnedFromEntryId: null,
     });
+  });
+
+  it("offers only the tax codes of the rule's direction and drops one that no longer fits", () => {
+    renderRules([]);
+    fireEvent.click(screen.getByRole("button", { name: "Neue Regel" }));
+    const form = screen.getByRole("form", { name: "Neue Regel" });
+    const tax = within(form).getByLabelText("Steuer") as HTMLSelectElement;
+    const options = () => [...tax.options].map((option) => option.value);
+    fireEvent.change(within(form).getByLabelText("Richtung"), { target: { value: "incoming" } });
+    expect(options()).toEqual(["", "vst19", "vst7", "rc13b", "pass_through", "not_taxable", "tax_free"]);
+    fireEvent.change(tax, { target: { value: "vst19" } });
+    fireEvent.change(within(form).getByLabelText("Richtung"), { target: { value: "outgoing" } });
+    expect(options()).toEqual(["", "ust19", "ust7", "eu_not_taxable", "not_taxable", "tax_free"]);
+    expect(tax.value).toBe("");
+    fireEvent.change(within(form).getByLabelText("Richtung"), { target: { value: "any" } });
+    expect(options()).toEqual(["", "not_taxable", "tax_free"]);
   });
 
   it("edits a rule with its current values", async () => {

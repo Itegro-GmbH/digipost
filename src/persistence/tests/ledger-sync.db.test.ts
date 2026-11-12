@@ -174,7 +174,7 @@ describe("syncProposals (decisions/0080 phase 3)", () => {
     await enable(ledger, w.workspaceId);
     await ledger.createRule({
       workspaceId: w.workspaceId,
-      rule: { contactId: null, counterpartyPattern: "luca schackmann", direction: "incoming", accountNumber: "2900", taxCode: null, paymentAccountNumber: null, noDocument: true, active: true },
+      rule: { contactId: null, counterpartyPattern: "luca schackmann", direction: "outgoing", accountNumber: "2900", taxCode: null, paymentAccountNumber: null, noDocument: true, active: true },
     });
 
     const first = await ledger.syncProposals({ workspaceId: w.workspaceId });
@@ -347,7 +347,7 @@ describe("syncProposals (decisions/0080 phase 3)", () => {
       book: true,
       entry: { bookingDate: "2026-06-15", text: "Stammeinlage", transactionId: w.capital.id, lines: [{ accountNumber: "1800", amountCents: 416_700 }, { accountNumber: "2900", amountCents: -416_700 }] },
     });
-    expect(await ledger.learnRuleFromEntry({ workspaceId: w.workspaceId, entryId })).toMatchObject({ counterpartyPattern: "luca schackmann", noDocument: true, direction: "incoming", accountNumber: "2900" });
+    expect(await ledger.learnRuleFromEntry({ workspaceId: w.workspaceId, entryId })).toMatchObject({ counterpartyPattern: "luca schackmann", noDocument: true, direction: "outgoing", accountNumber: "2900" });
   });
 
   it("without an advisor every document gets the template default with a warning; the sync job is queued once", async () => {

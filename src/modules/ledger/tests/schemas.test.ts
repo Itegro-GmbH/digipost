@@ -10,6 +10,7 @@ import {
   periodSchema,
   proposalInputSchema,
   ruleInputSchema,
+  RULE_TAX_CODES_BY_DIRECTION,
   updateEntryInputSchema,
 } from "@/modules/ledger";
 
@@ -84,6 +85,18 @@ describe("period, filing, match and rule schemas", () => {
     const rule = { contactId: null, direction: "incoming", accountNumber: "2900", taxCode: "not_taxable", paymentAccountNumber: null, noDocument: true };
     expect(ruleInputSchema.safeParse(rule).success).toBe(false);
     expect(ruleInputSchema.parse({ ...rule, counterpartyPattern: "Stammkapital" }).active).toBe(true);
+  });
+
+  it("restricts a rule's tax code to its direction", () => {
+    const base = { contactId: null, counterpartyPattern: "x", accountNumber: "6300", paymentAccountNumber: null, noDocument: false };
+    const ok = (direction: string, taxCode: string | null) => ruleInputSchema.safeParse({ ...base, direction, taxCode }).success;
+    for (const code of ["vst19", "vst7", "rc13b", "pass_through", "not_taxable", "tax_free", null]) expect(ok("incoming", code)).toBe(true);
+    for (const code of ["ust19", "ust7", "eu_not_taxable"]) expect(ok("incoming", code)).toBe(false);
+    for (const code of ["ust19", "ust7", "eu_not_taxable", "not_taxable", "tax_free", null]) expect(ok("outgoing", code)).toBe(true);
+    for (const code of ["vst19", "vst7", "rc13b", "pass_through"]) expect(ok("outgoing", code)).toBe(false);
+    for (const code of ["not_taxable", "tax_free", null]) expect(ok("any", code)).toBe(true);
+    for (const code of ["vst19", "ust19", "rc13b", "eu_not_taxable", "pass_through"]) expect(ok("any", code)).toBe(false);
+    expect(RULE_TAX_CODES_BY_DIRECTION.incoming).toContain("vst19");
   });
 
   it("defaults the entry list filter", () => {

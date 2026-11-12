@@ -44,6 +44,13 @@ export function SyncProposalsButton({ from, to }: { from?: string; to?: string }
         {result ? t("sync.result", { created: result.created, updated: result.updated, unproposed: result.unproposed }) : null}
         {result && result.deferred > 0 ? ` ${t("sync.deferred")}` : null}
       </p>
+      {result && result.problems.length > 0 ? (
+        <ul className="flex flex-col gap-0.5 text-xs text-muted-foreground">
+          {[...new Set(result.problems.map((problem) => problem.code))].map((code) => (
+            <li key={code}>{t(`problems.${code}`)}</li>
+          ))}
+        </ul>
+      ) : null}
       {errorCode ? (
         <p role="alert" className="text-sm text-destructive">
           {t(`errors.${errorCode}`)}

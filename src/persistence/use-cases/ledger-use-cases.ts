@@ -60,6 +60,7 @@ import {
   nextFreeNumber,
   parseDatevBalanceList,
   PLATFORM_RECEIVABLE_NUMBERS,
+  ruleTaxCodeFits,
   platformLedgerAccountText,
   SKR04_SEED_ACCOUNTS,
   summarizeEntry,
@@ -904,6 +905,7 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
         buyerName: invoice.buyerName,
         buyerCountry: invoice.einvoiceInput.buyer?.address?.country ?? null,
         documentId: invoice.documentId,
+        cancelsInvoiceId: invoice.cancelsInvoiceId,
         groups: invoiceVatGroups(
           (invoice.einvoiceInput.lines ?? []).map((line) => ({
             quantity: line.quantity,
@@ -1687,11 +1689,12 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
         if (!workspace) throw new UseCaseError(LEDGER_ERROR.notFound);
         await seedChart(repos, workspaceId);
       });
-      const result: SyncProposalsResult = { created: 0, updated: 0, kept: 0, failed: 0, unproposed: 0, deferred: 0, aiAsked: 0, aiCached: 0, aiUnavailable: 0, autoMatched: 0 };
+      const result: SyncProposalsResult = { created: 0, updated: 0, kept: 0, failed: 0, unproposed: 0, problems: [], deferred: 0, aiAsked: 0, aiCached: 0, aiUnavailable: 0, autoMatched: 0 };
       const snapshot = await loadSnapshot(workspaceId, settings, { from, to });
       const advice = await adviseAll(workspaceId, adviceQuestionsFor(snapshot), result);
       const plan = buildProposals(snapshot, advice, platformDisplayName);
       result.unproposed = plan.unproposed.length;
+      result.problems = plan.problems;
       result.deferred = plan.deferred.length;
 
       for (const draft of plan.drafts) {
@@ -1792,7 +1795,9 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
           (rule.contactId ? candidate.contactId === rule.contactId : candidate.contactId === null && candidate.counterpartyPattern === pattern) &&
           (candidate.direction === rule.direction || candidate.direction === "any"),
       );
-      return existing ? api.updateRule({ workspaceId, ruleId: existing.id, rule: { ...rule, direction: existing.direction } }) : api.createRule({ workspaceId, rule });
+      // An existing rule keeps its direction unless the learned tax code does not fit it.
+      const direction = existing && ruleTaxCodeFits(existing.direction, rule.taxCode) ? existing.direction : rule.direction;
+      return existing ? api.updateRule({ workspaceId, ruleId: existing.id, rule: { ...rule, direction } }) : api.createRule({ workspaceId, rule });
     },
   };
   return api;
