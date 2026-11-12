@@ -2,7 +2,7 @@
 
 Document type: decision
 Lifecycle: active
-Owner: src/modules/ledger (planned)
+Owner: src/modules/ledger
 Scope: The general ledger (chart of accounts, journal entries and their lines, tax codes,
 open-item accounts and their matches, booking rules, filings), how booking proposals are made
 from documents, transactions and settlement reports, what stays editable and what is locked,
@@ -15,7 +15,10 @@ Maintenance triggers:
 - The lock rule (what a filing freezes) changes
 - The existing clearing accounts (decisions/0026, decisions/0068) are migrated onto the ledger
 - The export format to the tax advisor is decided
-Last verified: 2026-11-12, initial proposal, against `src/persistence/schema/accounts.ts`,
+Last verified: 2026-11-12, stage 1 implemented (core, persistence, use cases, actions): status,
+"Model as implemented" and "Cascade verification" added, against `src/persistence/schema/ledger.ts`,
+`src/persistence/sql/ledger_balanced_entries/`, `src/persistence/sql/ledger_filing_lock/` and
+`src/persistence/tests/workspaces-repository.db.test.ts`. Previously 2026-11-12, initial proposal, against `src/persistence/schema/accounts.ts`,
 `src/persistence/schema/payments.ts`, `src/persistence/schema/documents.ts`,
 decisions/0026-platform-settlements.md, decisions/0066-abschluss-check-and-export.md,
 decisions/0068-supplier-clearing-accounts.md, decisions/0079-outgoing-invoices.md, and the
@@ -23,7 +26,12 @@ reconciliation of the tax advisor's evaluations for June to September 2026
 
 ## Status
 
-Proposed. Nothing is implemented yet. Builds on decisions/0024-accounts-and-transactions.md,
+Accepted, being implemented (stage 1: core). Stage 1 is the ledger core in `src/modules/ledger`
+and `src/persistence/use-cases/ledger-use-cases.ts`: the tables below, the SKR 04 seed, tax codes
+and their expansion, entries with revisions, booking, open-item matches, booking rules, filings
+and the lock, handovers, the tax advisor's balance lists, every report and control, and the
+Server Actions. Not yet: the proposal engine (phase 3, which writes through `upsertProposal`), the
+new extraction fields (phase 2) and every page. Builds on decisions/0024-accounts-and-transactions.md,
 decisions/0026-platform-settlements.md, decisions/0068-supplier-clearing-accounts.md,
 decisions/0066-abschluss-check-and-export.md and decisions/0079-outgoing-invoices.md.
 
@@ -158,6 +166,61 @@ Run on demand and before anything is sent out:
 - A USt-VA preview per month or quarter.
 - A comparison with the tax advisor's Summen- und Saldenliste per account, from an uploaded
   file.
+
+### Model as implemented (stage 1)
+
+The sketch above, with these changes:
+
+- **Settings and the feature flag.** `ledger_settings` (one row per workspace, `enabled` default
+  false, VAT period month or quarter, basis Soll or Ist, start date, chart `skr04`), owned by the
+  ledger rather than a column on `workspaces`. Enabling seeds the chart idempotently and adds an
+  account per bank `accounts` row (1800, 1810, ...), per platform clearing account (receivable
+  1370 ff.) and per contact clearing account (1461 ff., named after the contact).
+- **Tax codes are code constants**, not a `tax_codes` table: `vst19`, `vst7`, `rc13b`, `ust19`,
+  `ust7`, `eu_not_taxable`, `not_taxable`, `tax_free`, `pass_through`, each with its tax accounts
+  and USt-VA fields. Tax lines are generated from a base line and stored with `tax_role = 'tax'`.
+- **Plain uuid references to the sources.** `document_id`, `transaction_id`, the owners of an
+  account (bank account, contact), a rule's contact and every user id are plain values without a
+  foreign key, like `invoices`: the lock refuses UPDATEs, so an `on delete set null` from a
+  deleted document would either block that deletion or change a filed entry. The use case checks
+  each id belongs to the caller's workspace. Ledger-internal references are composite foreign
+  keys with `workspace_id`.
+- **Revisions survive a deletion.** `journal_entry_revisions.entry_id` is set null when the entry
+  is deleted; `entry_ref` keeps its id, and `booking_date` the date a handover's "changes since"
+  counts by.
+- **Matches** are `ledger_open_item_matches` (kind `match`, summing to zero, or `explained`, a
+  remainder with a note) and `ledger_open_item_match_lines` (a line in at most one match).
+- **Handovers** (`ledger_handovers`): "An Steuerberaterin übergeben" for a period; the changes
+  since are the revisions written after it.
+- **The tax advisor's balance lists** (`ledger_advisor_balances` and their lines): an uploaded
+  DATEV Summen- und Saldenliste, compared per account with the ledger's closing balances.
+- **Filings** carry a status (`draft`, `submitted`). The lock and the balance rule are two custom
+  migrations (`src/persistence/sql/ledger_filing_lock/`, `src/persistence/sql/ledger_balanced_entries/`).
+  The lock's correction path: a draft filing that corrects a submitted one of the same kind opens
+  the entries tied to it (`journal_entries.filing_id`) until it is submitted itself. A submitted
+  filing is frozen. A submitted USt-VA of a period does not open what an annual statement locks.
+
+### Cascade verification
+
+Every ledger table cascades from `workspaces.id`, so a workspace deletion removes the books in the
+same single `DELETE` (decisions/0027-hardening-and-deletion.md, whose own list is not edited
+because it is accepted). Both triggers let exactly that cascade through, recognized by the parent
+workspace row already being gone. `src/persistence/tests/workspaces-repository.db.test.ts` inserts a
+row into each of these, including a booked entry inside a submitted USt-VA period, and asserts
+none is left:
+
+- `ledger_settings`
+- `ledger_accounts`
+- `journal_entries`
+- `journal_lines`
+- `journal_entry_revisions`
+- `ledger_open_item_matches`
+- `ledger_open_item_match_lines`
+- `ledger_booking_rules`
+- `ledger_filings`
+- `ledger_handovers`
+- `ledger_advisor_balances`
+- `ledger_advisor_balance_lines`
 
 ## Phases
 
