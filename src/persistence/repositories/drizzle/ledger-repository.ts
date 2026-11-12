@@ -16,6 +16,7 @@ import {
   ledgerAccounts,
   ledgerAdvisorBalanceLines,
   ledgerAdvisorBalances,
+  ledgerBookingAdvice,
   ledgerBookingRules,
   ledgerFilings,
   ledgerHandovers,
@@ -224,6 +225,7 @@ export function createDrizzleLedgerRepository(db: DbExecutor): LedgerRepository 
           documentId: journalEntries.documentId,
           transactionId: journalEntries.transactionId,
           status: journalEntries.status,
+          lineDocumentId: journalLines.documentId,
         })
         .from(journalLines)
         .innerJoin(journalEntries, and(eq(journalEntries.id, journalLines.entryId), eq(journalEntries.workspaceId, journalLines.workspaceId)))
@@ -378,6 +380,29 @@ export function createDrizzleLedgerRepository(db: DbExecutor): LedgerRepository 
       return rows.map((row) => ({ ...row.line, entryStatus: row.entryStatus }));
     },
 
+    async listUnmatchedOpenItemLines(workspaceId, accountId) {
+      const conditions: SQL[] = [
+        eq(journalLines.workspaceId, workspaceId),
+        eq(journalEntries.status, "booked"),
+        eq(ledgerAccounts.openItems, true),
+        sql`not exists (select 1 from ${ledgerOpenItemMatchLines} where ${ledgerOpenItemMatchLines.lineId} = ${journalLines.id})`,
+      ];
+      if (accountId) conditions.push(eq(journalLines.accountId, accountId));
+      return db
+        .select({
+          lineId: journalLines.id,
+          accountId: journalLines.accountId,
+          amountCents: journalLines.amountCents,
+          documentId: journalLines.documentId,
+          bookingDate: journalEntries.bookingDate,
+        })
+        .from(journalLines)
+        .innerJoin(journalEntries, and(eq(journalEntries.id, journalLines.entryId), eq(journalEntries.workspaceId, journalLines.workspaceId)))
+        .innerJoin(ledgerAccounts, and(eq(ledgerAccounts.id, journalLines.accountId), eq(ledgerAccounts.workspaceId, journalLines.workspaceId)))
+        .where(and(...conditions))
+        .orderBy(asc(journalEntries.bookingDate), asc(journalLines.id));
+    },
+
     // -----------------------------------------------------------------------------------------
     // Booking rules
     // -----------------------------------------------------------------------------------------
@@ -403,6 +428,31 @@ export function createDrizzleLedgerRepository(db: DbExecutor): LedgerRepository 
         .where(and(eq(ledgerBookingRules.workspaceId, workspaceId), eq(ledgerBookingRules.id, id)))
         .returning();
       return row ?? null;
+    },
+
+    async incrementRuleHits(workspaceId, id) {
+      await db
+        .update(ledgerBookingRules)
+        .set({ hits: sql`${ledgerBookingRules.hits} + 1` })
+        .where(and(eq(ledgerBookingRules.workspaceId, workspaceId), eq(ledgerBookingRules.id, id)));
+    },
+
+    async listBookingAdvice(workspaceId, documentIds) {
+      if (documentIds.length === 0) return [];
+      return db
+        .select()
+        .from(ledgerBookingAdvice)
+        .where(and(eq(ledgerBookingAdvice.workspaceId, workspaceId), inArray(ledgerBookingAdvice.documentId, documentIds)));
+    },
+
+    async upsertBookingAdvice(row) {
+      await db
+        .insert(ledgerBookingAdvice)
+        .values(row)
+        .onConflictDoUpdate({
+          target: [ledgerBookingAdvice.workspaceId, ledgerBookingAdvice.documentId],
+          set: { cacheKey: row.cacheKey, answer: row.answer, updatedAt: new Date() },
+        });
     },
 
     async deleteRule(workspaceId, id) {

@@ -32,6 +32,7 @@ import {
   ledgerAccounts,
   ledgerAdvisorBalanceLines,
   ledgerAdvisorBalances,
+  ledgerBookingAdvice,
   ledgerBookingRules,
   ledgerFilings,
   ledgerHandovers,
@@ -622,6 +623,7 @@ describe("createDrizzleWorkspaceRepository.delete (F5, decisions/0027-hardening-
     const [advisorUpload] = await db.insert(ledgerAdvisorBalances).values({ workspaceId: workspace.id, periodFrom: "2026-01-01", periodTo: "2026-03-31" }).returning();
     if (!advisorUpload) throw new Error("failed to insert advisor upload fixture");
     await db.insert(ledgerAdvisorBalanceLines).values({ workspaceId: workspace.id, uploadId: advisorUpload.id, accountNumber: "1800", balanceCents: 1000 });
+    await db.insert(ledgerBookingAdvice).values({ workspaceId: workspace.id, documentId: randomUUID(), cacheKey: "k", answer: { accountNumber: "6300", taxCode: null, reason: "Test." } });
 
     // A second workspace's own document, to prove the delete below never reaches it.
     const [otherDocument] = await db
@@ -679,6 +681,7 @@ describe("createDrizzleWorkspaceRepository.delete (F5, decisions/0027-hardening-
       ledgerHandovers,
       ledgerAdvisorBalances,
       ledgerAdvisorBalanceLines,
+      ledgerBookingAdvice,
     ]) {
       expect(await db.select().from(table).where(eq(table.workspaceId, workspace.id))).toHaveLength(0);
     }

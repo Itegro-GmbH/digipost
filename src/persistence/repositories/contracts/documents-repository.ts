@@ -339,6 +339,9 @@ export type LedgerDocumentRow = DocumentTaxFields & {
   effectiveDate: string;
   title: string | null;
   sender: string | null;
+  /** The extracted one-paragraph summary (never the OCR text): what the ledger's AI advisor may
+   * be told about the document. */
+  summary: string | null;
   originalFileName: string;
   invoiceNumber: string | null;
   totalAmountCents: number | null;

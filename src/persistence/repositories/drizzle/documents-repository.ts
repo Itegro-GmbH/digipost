@@ -614,6 +614,7 @@ export function createDrizzleDocumentRepository(db: DbExecutor): DocumentReposit
           effectiveDate: sql<string>`to_char(${documentEffectiveDate}, 'YYYY-MM-DD')`,
           title: documents.title,
           sender: documents.sender,
+          summary: documents.summary,
           originalFileName: documents.originalFileName,
           invoiceNumber: documents.invoiceNumber,
           totalAmountCents: documents.totalAmountCents,

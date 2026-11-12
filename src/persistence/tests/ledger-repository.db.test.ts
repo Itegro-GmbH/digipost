@@ -67,8 +67,8 @@ function entryRow(workspaceId: string, overrides: Partial<CreateJournalEntryRow>
 
 function lines(debit: LedgerAccountRow, credit: LedgerAccountRow, cents = 150): CreateJournalLineRow[] {
   return [
-    { position: 1, accountId: debit.id, amountCents: cents, taxCode: null, taxRole: null, generatedFromLinePosition: null, text: null },
-    { position: 2, accountId: credit.id, amountCents: -cents, taxCode: null, taxRole: null, generatedFromLinePosition: null, text: null },
+    { position: 1, accountId: debit.id, amountCents: cents, taxCode: null, taxRole: null, generatedFromLinePosition: null, documentId: null, text: null },
+    { position: 2, accountId: credit.id, amountCents: -cents, taxCode: null, taxRole: null, generatedFromLinePosition: null, documentId: null, text: null },
   ];
 }
 

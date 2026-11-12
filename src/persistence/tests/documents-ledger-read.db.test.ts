@@ -181,6 +181,7 @@ describe("DocumentRepository.listForLedger (decisions/0080, phase 2)", () => {
         effectiveDate: "2026-03-31",
         title: "Rechnung",
         sender: "Druckerei Muster GmbH",
+        summary: null,
         originalFileName: "beleg.pdf",
         invoiceNumber: "RE-1",
         totalAmountCents: 18188,

@@ -8,6 +8,7 @@
 import type { InferSelectModel } from "drizzle-orm";
 
 import type {
+  BookingAdviceRaw,
   BookingRuleDirection,
   EntrySnapshot,
   FilingKind,
@@ -32,6 +33,7 @@ import type {
   ledgerAccounts,
   ledgerAdvisorBalanceLines,
   ledgerAdvisorBalances,
+  ledgerBookingAdvice,
   ledgerBookingRules,
   ledgerFilings,
   ledgerHandovers,
@@ -50,6 +52,7 @@ export type LedgerFilingRow = InferSelectModel<typeof ledgerFilings>;
 export type LedgerHandoverRow = InferSelectModel<typeof ledgerHandovers>;
 export type LedgerAdvisorBalanceRow = InferSelectModel<typeof ledgerAdvisorBalances>;
 export type LedgerAdvisorBalanceLineRow = InferSelectModel<typeof ledgerAdvisorBalanceLines>;
+export type LedgerBookingAdviceRow = InferSelectModel<typeof ledgerBookingAdvice>;
 
 export type LedgerSettingsPatch = { enabled: boolean; vatPeriod: VatPeriod; vatBasis: VatBasis; startDate: string | null };
 
@@ -105,6 +108,7 @@ export type CreateJournalLineRow = {
   taxCode: TaxCode | null;
   taxRole: TaxRole | null;
   generatedFromLinePosition: number | null;
+  documentId: string | null;
   text: string | null;
 };
 
@@ -150,7 +154,12 @@ export type LedgerReportLineRow = {
   documentId: string | null;
   transactionId: string | null;
   status: JournalEntryStatus;
+  /** The line's own open-item reference (`journal_lines.document_id`). */
+  lineDocumentId: string | null;
 };
+
+/** A booked line on an open-item account that no match holds yet. */
+export type UnmatchedOpenItemLineRow = { lineId: string; accountId: string; amountCents: number; documentId: string | null; bookingDate: string };
 
 export type LedgerEntryCounts = { booked: number; proposed: number; unbalancedProposed: number };
 
@@ -236,6 +245,8 @@ export interface LedgerRepository {
   findMatchedLineIds(workspaceId: string, lineIds: string[]): Promise<string[]>;
   /** The lines with their entry's status, for a match's checks. */
   findLines(workspaceId: string, lineIds: string[]): Promise<Array<JournalLineRow & { entryStatus: JournalEntryStatus }>>;
+  /** Booked lines on open-item accounts (one account, or all) that belong to no match yet. */
+  listUnmatchedOpenItemLines(workspaceId: string, accountId?: string): Promise<UnmatchedOpenItemLineRow[]>;
 
   // Booking rules
   listRules(workspaceId: string): Promise<LedgerBookingRuleRow[]>;
@@ -243,6 +254,14 @@ export interface LedgerRepository {
   insertRule(row: CreateBookingRuleRow): Promise<LedgerBookingRuleRow>;
   updateRule(workspaceId: string, id: string, patch: Omit<CreateBookingRuleRow, "workspaceId">): Promise<LedgerBookingRuleRow | null>;
   deleteRule(workspaceId: string, id: string): Promise<boolean>;
+  /** One more booked proposal that came from this rule. */
+  incrementRuleHits(workspaceId: string, id: string): Promise<void>;
+
+  // The AI booking advisor's answers (decisions/0080 phase 3)
+  /** The stored answer per document, whatever question it answered (the caller compares the key). */
+  listBookingAdvice(workspaceId: string, documentIds: string[]): Promise<LedgerBookingAdviceRow[]>;
+  /** Inserts or replaces the answer for the document. */
+  upsertBookingAdvice(row: { workspaceId: string; documentId: string; cacheKey: string; answer: BookingAdviceRaw }): Promise<void>;
 
   // Filings
   /** Newest period first. */

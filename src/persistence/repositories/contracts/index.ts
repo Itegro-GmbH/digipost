@@ -123,6 +123,8 @@ export type {
   CreditDebitIndicator,
   ImportBatchRepository,
   ImportBatchRow,
+  LedgerSettlementLineRow,
+  LedgerTransactionRow,
   SettlementLineRepository,
   SettlementLineRow,
   SettlementLineType,

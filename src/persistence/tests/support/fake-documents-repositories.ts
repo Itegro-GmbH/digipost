@@ -403,6 +403,7 @@ export function createFakeDocumentRepository(
           effectiveDate: fakeEffectiveDate(r),
           title: r.title,
           sender: r.sender,
+          summary: r.summary,
           originalFileName: r.originalFileName,
           invoiceNumber: r.invoiceNumber,
           totalAmountCents: r.totalAmountCents,

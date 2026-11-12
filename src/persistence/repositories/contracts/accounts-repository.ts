@@ -202,6 +202,38 @@ export type ClosingTransactionRow = {
   confirmedDocuments: ClosingLinkedDocument[];
 };
 
+/** decisions/0080 phase 3: one transaction on a BANK `accounts` row, as the ledger's proposal
+ * engine books it. Never a clearing account's own (synthetic) transaction. */
+export type LedgerTransactionRow = {
+  id: string;
+  accountId: string;
+  bookingDate: string;
+  /** Signed, in cents: positive is money in. */
+  amountCents: number;
+  currency: string;
+  counterpartyName: string | null;
+  counterpartyIban: string | null;
+  remittanceText: string | null;
+  noDocumentNeeded: boolean;
+  /** The clearing account this bank row is tied to by its `transfer_group_id` (an app-store
+   * payout, decisions/0026/0048; a supplier charge, decisions/0068), with the report documents
+   * whose payout line is the partner row; `null` when unpaired. */
+  pairedClearing: { accountId: string; platform: string | null; contactId: string | null; reportDocumentIds: string[] } | null;
+};
+
+/** decisions/0080 phase 3: one settlement line with its clearing account's platform. */
+export type LedgerSettlementLineRow = {
+  id: string;
+  sourceDocumentId: string;
+  platform: string | null;
+  type: SettlementLineType;
+  grossCents: number | null;
+  feeCents: number | null;
+  netCents: number | null;
+  currency: string | null;
+  bookingDate: string | null;
+};
+
 export interface TransactionRepository {
   /** F3b: fetching one transaction to build a `MatchableTransaction` (manual linking, the
    * document-detail payment section, an "existing decision" lookup) - `list` above always
@@ -283,6 +315,9 @@ export interface TransactionRepository {
    * or by amount-and-date proximity (decisions/0026's own fixed matching rule: "payout id in
    * remittance text, else amount + date within 3 days"). */
   findUnpairedBankMatch(workspaceId: string, candidate: { amountCents: number; bookingDate: string; payoutId: string | null }): Promise<TransactionRow | null>;
+  /** decisions/0080 phase 3: every transaction on a bank account of the workspace, oldest first,
+   * with the clearing account it is paired with. Read by the ledger, never written. */
+  listForLedger(workspaceId: string): Promise<LedgerTransactionRow[]>;
 }
 
 /** One normalized settlement line, ready to insert - `@/modules/accounts`'s
@@ -328,6 +363,9 @@ export interface SettlementLineRepository {
    * calls this after inserting its own new transactions, to retry pairing every
    * still-unpaired payout in the workspace, not only ones from the document just imported. */
   listUnpairedPayoutLines(workspaceId: string): Promise<Array<{ settlementLineId: string; transactionId: string; amountCents: number; bookingDate: string | null; payoutId: string | null }>>;
+  /** decisions/0080 phase 3: every settlement line of the workspace with its platform, by report
+   * and booking date. Read by the ledger, never written. */
+  listForLedger(workspaceId: string): Promise<LedgerSettlementLineRow[]>;
 }
 
 export interface ImportBatchRepository {

@@ -51,6 +51,7 @@ import {
   TAX_ROLES,
   VAT_BASES,
   VAT_PERIODS,
+  type BookingAdviceRaw,
   type EntrySnapshot,
   type ProposalWarningCode,
 } from "@/modules/ledger";
@@ -214,11 +215,16 @@ export const journalLines = pgTable(
     taxCode: text({ enum: TAX_CODES }),
     taxRole: text({ enum: TAX_ROLES }),
     generatedFromLinePosition: integer(),
+    /** The open item this line books or pays (a document id, plain value, see the header): the
+     * invoice's line on an open-item account and its payment's lines carry the same one, so the
+     * two can be matched (decisions/0080 phase 3). */
+    documentId: uuid(),
     text: text(),
   },
   (t) => [
     unique("journal_lines_entry_position_key").on(t.entryId, t.position),
     index("journal_lines_workspace_account_idx").on(t.workspaceId, t.accountId),
+    index("journal_lines_workspace_document_idx").on(t.workspaceId, t.documentId),
     foreignKey({ name: "journal_lines_entry_fk", columns: [t.workspaceId, t.entryId], foreignColumns: [journalEntries.workspaceId, journalEntries.id] }).onDelete("cascade"),
     foreignKey({ name: "journal_lines_account_fk", columns: [t.workspaceId, t.accountId], foreignColumns: [ledgerAccounts.workspaceId, ledgerAccounts.id] }),
     check("journal_lines_amount_check", sql`${t.amountCents} <> 0`),
@@ -389,4 +395,25 @@ export const ledgerAdvisorBalanceLines = pgTable(
       foreignColumns: [ledgerAdvisorBalances.workspaceId, ledgerAdvisorBalances.id],
     }).onDelete("cascade"),
   ],
+);
+
+/** The AI booking advisor's last answer per document (decisions/0080 phase 3), of any kind, so a
+ * sync never asks the same question twice: `cache_key` hashes the whole question and the
+ * advisor's version (`bookingAdviceCacheKey`), and a different key asks again and replaces the
+ * row. The document id is a plain value (see the header). */
+export const ledgerBookingAdvice = pgTable(
+  "ledger_booking_advice",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    workspaceId: uuid()
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    documentId: uuid().notNull(),
+    cacheKey: text().notNull(),
+    /** The raw answer as `toCacheableBookingAdvice` stores it; validated again on every use. */
+    answer: jsonb().$type<BookingAdviceRaw>().notNull(),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [unique("ledger_booking_advice_workspace_document_key").on(t.workspaceId, t.documentId)],
 );
