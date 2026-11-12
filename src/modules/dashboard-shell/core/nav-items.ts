@@ -18,11 +18,24 @@
 // `src/platform/access`'s own README).
 import type { Permission } from "@/platform/access";
 
+/** Per-workspace features an entry can depend on, beyond the caller's permissions: the entry
+ * shows only when `src/app/(app)/layout.tsx` reports the feature as on for the active workspace
+ * (decisions/0080: the ledger is enabled per workspace and off by default). Display only, like
+ * `permission`: every page checks the feature again itself. */
+export const NAV_FEATURES = ["ledger"] as const;
+export type NavFeature = (typeof NAV_FEATURES)[number];
+
+/** Counts an entry may show next to its label, supplied by the layout (never fetched here). */
+export const NAV_BADGES = ["ledgerProposals"] as const;
+export type NavBadge = (typeof NAV_BADGES)[number];
+
 export type NavEntry = {
   /** `null` marks a planned capability with no route yet (see this file's header). */
   href: string | null;
   labelKey: string;
   permission?: Permission;
+  feature?: NavFeature;
+  badge?: NavBadge;
 };
 
 export type NavSection = {
@@ -65,6 +78,17 @@ export const NAV_SECTIONS: readonly NavSection[] = [
   // checks a period for completeness and exports it for the tax advisor. A standalone entry
   // rather than a section, because the check and the export are one workflow, not two rooms.
   { labelKey: null, items: [{ href: "/dashboard/abschluss", labelKey: "closing", permission: "finance.read" }] },
+  // "Buchhaltung" (`src/modules/ledger`, decisions/0080-ledger-double-entry-bookkeeping.md):
+  // admin-only like "Finanzen" (`finance.read`), and only for a workspace that enabled the
+  // ledger (`feature`). "Zu prüfen" carries the count of proposals waiting for review.
+  {
+    labelKey: "sections.ledger",
+    items: [
+      { href: "/dashboard/buchhaltung", labelKey: "ledgerOverview", permission: "finance.read", feature: "ledger" },
+      { href: "/dashboard/buchhaltung/zu-pruefen", labelKey: "ledgerQueue", permission: "finance.read", feature: "ledger", badge: "ledgerProposals" },
+      { href: "/dashboard/buchhaltung/journal", labelKey: "ledgerJournal", permission: "finance.read", feature: "ledger" },
+    ],
+  },
   // decisions/0079-outgoing-invoices.md: writing invoices is everyday work for every member,
   // a standalone entry rather than part of the admin-only "Finanzen".
   { labelKey: null, items: [{ href: "/dashboard/invoices", labelKey: "invoices", permission: "invoices.manage" }] },
@@ -128,11 +152,15 @@ export function activeSectionKey(pathname: string, sections: readonly NavSection
 }
 
 /**
- * `NAV_SECTIONS` with every entry the caller may not see removed, and every section that ends
- * up empty dropped along with its heading (display only, see this file's header).
+ * `NAV_SECTIONS` with every entry the caller may not see removed (a missing permission, or a
+ * feature the active workspace has not enabled), and every section that ends up empty dropped
+ * along with its heading (display only, see this file's header).
  */
-export function visibleNavSections(permissions: readonly Permission[], sections: readonly NavSection[] = NAV_SECTIONS): NavSection[] {
-  return sections
-    .map((section) => ({ ...section, items: section.items.filter((item) => !item.permission || permissions.includes(item.permission)) }))
-    .filter((section) => section.items.length > 0);
+export function visibleNavSections(
+  permissions: readonly Permission[],
+  sections: readonly NavSection[] = NAV_SECTIONS,
+  features: readonly NavFeature[] = [],
+): NavSection[] {
+  const visible = (item: NavEntry) => (!item.permission || permissions.includes(item.permission)) && (!item.feature || features.includes(item.feature));
+  return sections.map((section) => ({ ...section, items: section.items.filter(visible) })).filter((section) => section.items.length > 0);
 }

@@ -313,7 +313,8 @@
       "sections": {
         "post": "Post",
         "money": "Finanzen",
-        "admin": "Verwaltung"
+        "admin": "Verwaltung",
+        "ledger": "Buchhaltung"
       },
       "start": "Start",
       "inbox": "Posteingang",
@@ -323,13 +324,17 @@
       "matching": "Zuordnung",
       "openItems": "Offene Posten",
       "closing": "Abschluss",
+      "ledgerOverview": "Übersicht",
+      "ledgerQueue": "Zu prüfen",
+      "ledgerJournal": "Journal",
       "invoices": "Rechnungen",
       "contacts": "Kontakte",
       "team": "Team",
       "companySettings": "Firmendaten",
       "intakeSettings": "Erkannte Quellen",
       "aiClients": "KI-Verbindungen",
-      "billing": "Tarif & Nutzung"
+      "billing": "Tarif & Nutzung",
+      "badge": "{count, plural, one {# Vorschlag wartet} other {# Vorschläge warten}}"
     },
     "workspaceSwitcher": {
       "toggle": "Firma wechseln",

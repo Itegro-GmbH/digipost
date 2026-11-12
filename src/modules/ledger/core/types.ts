@@ -200,6 +200,8 @@ export type JournalEntryListItem = {
   origin: JournalEntryOrigin;
   dismissed: boolean;
   sourceKey: string | null;
+  /** `template:<id>`, `rule:<ruleId>`, the AI's one German sentence, or `null` (manual). */
+  originReason: string | null;
   documentId: string | null;
   transactionId: string | null;
   /** Sum of the debit side: what the entry moves. */
@@ -225,7 +227,6 @@ export type JournalEntryRevisionView = {
 
 export type JournalEntryView = JournalEntryListItem & {
   serviceDate: string | null;
-  originReason: string | null;
   correctionOfEntryId: string | null;
   filingId: string | null;
   bookedAt: string | null;
@@ -349,3 +350,46 @@ export type SyncProposalsResult = {
   aiUnavailable: number;
   autoMatched: number;
 };
+
+/** A document an entry books or the review queue lists, as the ledger UI shows it (the source
+ * panel, "Probleme"): its extracted fields only, never OCR text. */
+export type LedgerSourceDocument = {
+  id: string;
+  kind: string;
+  direction: string | null;
+  title: string | null;
+  sender: string | null;
+  documentDate: string | null;
+  effectiveDate: string;
+  invoiceNumber: string | null;
+  totalAmountCents: number | null;
+  currency: string | null;
+  netTotalCents: number | null;
+  taxTotalCents: number | null;
+  taxBreakdown: { ratePercent: number; netCents: number | null; taxCents: number | null }[] | null;
+  passThroughCents: number | null;
+  reverseCharge: boolean | null;
+  serviceDate: string | null;
+  servicePeriodFrom: string | null;
+  servicePeriodTo: string | null;
+  contactId: string | null;
+  contactName: string | null;
+  originalFileName: string;
+};
+
+/** A bank transaction an entry books or the review queue lists. */
+export type LedgerSourceTransaction = {
+  id: string;
+  /** The bank `accounts` row and its name. */
+  accountId: string;
+  accountName: string | null;
+  bookingDate: string;
+  /** Signed: positive is money in. */
+  amountCents: number;
+  currency: string;
+  counterpartyName: string | null;
+  remittanceText: string | null;
+};
+
+/** `getSources`: what was found; a missing id (deleted, or of another workspace) is absent. */
+export type LedgerSourcesView = { documents: LedgerSourceDocument[]; transactions: LedgerSourceTransaction[] };

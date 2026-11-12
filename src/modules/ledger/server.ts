@@ -6,7 +6,9 @@ import "server-only";
  * `/dashboard/buchhaltung/**`.
  */
 export {
+  countLedgerWaitingProposalsProjection,
   getJournalEntryProjection,
+  getLedgerSourcesProjection,
   getLedgerAccountSheetProjection,
   getLedgerAdvisorComparisonProjection,
   getLedgerBalancesProjection,

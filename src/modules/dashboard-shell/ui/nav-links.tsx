@@ -9,7 +9,7 @@ import { ChevronDown } from "lucide-react";
 import type { Permission } from "@/platform/access";
 import { cn } from "@/shared/ui-primitives";
 
-import { activeNavHref, activeSectionKey, sectionTarget, visibleNavSections, type NavEntry } from "../core/nav-items";
+import { activeNavHref, activeSectionKey, NAV_SECTIONS, sectionTarget, visibleNavSections, type NavBadge, type NavEntry, type NavFeature } from "../core/nav-items";
 
 /** A planned capability's badge (decisions/0055): a row, never a link. */
 function SoonBadge({ label }: { label: string }) {
@@ -22,9 +22,15 @@ export function NavLinks({
   onNavigate,
   className,
   permissions,
+  features = [],
+  badges = {},
 }: {
   onNavigate?: () => void;
   className?: string;
+  /** Per-workspace features that are on; an entry needing another one is hidden (display only). */
+  features?: readonly NavFeature[];
+  /** Counts shown next to an entry with a `badge` (zero shows nothing). */
+  badges?: Partial<Record<NavBadge, number>>;
   /** Hides a permission-gated entry (e.g. "Zuständigkeiten") from anyone whose bundle does
    * not include it, and a whole section once nothing in it is left - display only,
    * `src/platform/access`'s own README. */
@@ -32,7 +38,7 @@ export function NavLinks({
 }) {
   const pathname = usePathname();
   const t = useTranslations("DashboardShell.nav");
-  const sections = visibleNavSections(permissions);
+  const sections = visibleNavSections(permissions, NAV_SECTIONS, features);
   const active = activeNavHref(pathname);
 
   // decisions/0057-sections-are-disclosures.md: exactly one section is open, and by default it
@@ -51,6 +57,7 @@ export function NavLinks({
         </p>
       );
     }
+    const badgeCount = item.badge ? (badges[item.badge] ?? 0) : 0;
     return (
       <Link
         key={item.href}
@@ -63,7 +70,13 @@ export function NavLinks({
           item.href === active ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground",
         )}
       >
-        {t(item.labelKey)}
+        <span>{t(item.labelKey)}</span>
+        {badgeCount > 0 ? (
+          <span className="rounded-full bg-muted px-2 py-0.5 text-xs tabular-nums text-foreground">
+            <span aria-hidden>{badgeCount}</span>
+            <span className="sr-only">{t("badge", { count: badgeCount })}</span>
+          </span>
+        ) : null}
       </Link>
     );
   };

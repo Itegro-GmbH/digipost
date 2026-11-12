@@ -1,12 +1,16 @@
 "use client";
 
 import { useState } from "react";
+import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Menu, X } from "lucide-react";
 
 import type { Permission } from "@/platform/access";
-import { Button } from "@/shared/ui-primitives";
+import { Button, cn } from "@/shared/ui-primitives";
 import { signOutAction } from "@/modules/sign-in/actions";
+
+import { usesWideLayout } from "../core/layout";
+import type { NavBadge, NavFeature } from "../core/nav-items";
 
 import { NavLinks } from "./nav-links";
 import { WorkspaceSwitcher, type SwitchableWorkspace } from "./workspace-switcher";
@@ -22,6 +26,11 @@ import { WorkspaceSwitcher, type SwitchableWorkspace } from "./workspace-switche
  * workspace switcher that replaces the plain workspace name wherever it appears. They are
  * display data only: switching goes through `src/modules/workspaces`' own Server Action,
  * which re-checks the membership server-side.
+ *
+ * `features` and `navBadges` (decisions/0080-ledger-double-entry-bookkeeping.md) are display
+ * data as well: which per-workspace features are on (the ledger's nav section) and the counts
+ * next to a nav entry ("Zu prüfen"). Pages under `WIDE_LAYOUT_PREFIXES` (`core/layout.ts`) get
+ * a wider content column for their tables.
  */
 export function DashboardShell({
   userEmail,
@@ -29,6 +38,8 @@ export function DashboardShell({
   activeWorkspaceId,
   workspaces,
   permissions,
+  features = [],
+  navBadges = {},
   children,
 }: {
   userEmail: string;
@@ -36,9 +47,12 @@ export function DashboardShell({
   activeWorkspaceId: string;
   workspaces: readonly SwitchableWorkspace[];
   permissions: readonly Permission[];
+  features?: readonly NavFeature[];
+  navBadges?: Partial<Record<NavBadge, number>>;
   children: React.ReactNode;
 }) {
   const t = useTranslations("DashboardShell");
+  const pathname = usePathname();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   return (
@@ -55,7 +69,7 @@ export function DashboardShell({
           <span className="font-heading text-xl font-medium text-foreground">{t("appName")}</span>
           <WorkspaceSwitcher workspaces={workspaces} activeWorkspaceId={activeWorkspaceId} workspaceName={workspaceName} />
         </div>
-        <NavLinks permissions={permissions} />
+        <NavLinks permissions={permissions} features={features} badges={navBadges} />
       </aside>
 
       <div className="flex flex-1 flex-col">
@@ -95,11 +109,11 @@ export function DashboardShell({
 
         {mobileNavOpen ? (
           <div id="dashboard-mobile-nav" className="border-b border-border p-4 md:hidden">
-            <NavLinks onNavigate={() => setMobileNavOpen(false)} permissions={permissions} />
+            <NavLinks onNavigate={() => setMobileNavOpen(false)} permissions={permissions} features={features} badges={navBadges} />
           </div>
         ) : null}
 
-        <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-8">{children}</main>
+        <main className={cn("mx-auto w-full flex-1 px-4 py-8", usesWideLayout(pathname) ? "max-w-6xl" : "max-w-3xl")}>{children}</main>
       </div>
     </div>
   );

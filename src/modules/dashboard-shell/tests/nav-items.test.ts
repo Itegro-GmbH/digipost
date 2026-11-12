@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 
 import de from "@/i18n/messages/de.json";
 
+import { usesWideLayout } from "../core/layout";
 import { activeNavHref, activeSectionKey, NAV_SECTIONS, sectionTarget, visibleNavSections } from "../core/nav-items";
 
 function resolveMessage(key: string): unknown {
@@ -144,5 +145,57 @@ describe("visibleNavSections", () => {
     const hrefs = visibleNavSections([]).flatMap((section) => section.items.map((item) => item.href));
     expect(hrefs).toContain("/dashboard");
     expect(hrefs).toContain("/dashboard/billing");
+  });
+});
+
+// decisions/0080-ledger-double-entry-bookkeeping.md: the "Buchhaltung" section is admin-only
+// (`finance.read`) AND needs the ledger enabled for the active workspace (`feature`).
+describe("the ledger section", () => {
+  const ledgerHrefs = (sections: ReturnType<typeof visibleNavSections>) =>
+    sections.flatMap((section) => section.items.map((item) => item.href)).filter((href) => href?.startsWith("/dashboard/buchhaltung"));
+
+  it("gates every ledger entry behind finance.read and the ledger feature", () => {
+    const ledgerEntries = entries.filter((item) => item.href?.startsWith("/dashboard/buchhaltung"));
+    expect(ledgerEntries.map((item) => item.href)).toEqual(["/dashboard/buchhaltung", "/dashboard/buchhaltung/zu-pruefen", "/dashboard/buchhaltung/journal"]);
+    expect(ledgerEntries.every((item) => item.permission === "finance.read" && item.feature === "ledger")).toBe(true);
+  });
+
+  it("is hidden from an admin whose workspace has not enabled the ledger", () => {
+    const sections = visibleNavSections(["finance.read"]);
+    expect(ledgerHrefs(sections)).toEqual([]);
+    expect(sections.some((section) => section.labelKey === "sections.ledger")).toBe(false);
+  });
+
+  it("is hidden from a member even when the ledger is enabled", () => {
+    expect(ledgerHrefs(visibleNavSections(["documents.write"], NAV_SECTIONS, ["ledger"]))).toEqual([]);
+  });
+
+  it("shows for an admin with the ledger enabled", () => {
+    const sections = visibleNavSections(["finance.read"], NAV_SECTIONS, ["ledger"]);
+    expect(ledgerHrefs(sections)).toHaveLength(3);
+    expect(sections.find((section) => section.labelKey === "sections.ledger")).toBeDefined();
+  });
+
+  it("keeps entries without a feature for everyone, whatever the features", () => {
+    expect(visibleNavSections([], NAV_SECTIONS, ["ledger"]).flatMap((section) => section.items.map((item) => item.href))).toContain("/dashboard");
+  });
+
+  it("marks the queue for a subpage of the ledger, not the overview", () => {
+    expect(activeNavHref("/dashboard/buchhaltung/zu-pruefen")).toBe("/dashboard/buchhaltung/zu-pruefen");
+    expect(activeNavHref("/dashboard/buchhaltung/buchung/abc")).toBe("/dashboard/buchhaltung");
+    expect(activeSectionKey("/dashboard/buchhaltung/journal")).toBe("sections.ledger");
+  });
+
+  it("has copy for the queue's badge", () => {
+    expect(typeof de.DashboardShell.nav.badge).toBe("string");
+  });
+});
+
+describe("usesWideLayout", () => {
+  it("widens the ledger pages and nothing else", () => {
+    expect(usesWideLayout("/dashboard/buchhaltung")).toBe(true);
+    expect(usesWideLayout("/dashboard/buchhaltung/journal")).toBe(true);
+    expect(usesWideLayout("/dashboard/buchhaltungen")).toBe(false);
+    expect(usesWideLayout("/dashboard/finance")).toBe(false);
   });
 });

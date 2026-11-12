@@ -17,6 +17,7 @@ import type {
   JournalEntryView,
   LedgerAccountView,
   LedgerSettingsView,
+  LedgerSourcesView,
   MatchSuggestion,
   OpenItemAccountSummary,
   PeriodOverviewRow,
@@ -42,6 +43,17 @@ export const listLedgerAccountsProjection = cache(async (workspaceId: string): P
 /** `filter` is compared by reference by `cache()`; pass a fresh object per request. */
 export const listJournalEntriesProjection = cache(async (workspaceId: string, filter: ListEntriesFilter): Promise<JournalEntryListItem[]> => {
   return getRequestServices().ledger.listEntries(workspaceId, filter);
+});
+
+/** The navigation's "Zu prüfen" badge; only called once the ledger is known to be on. */
+export const countLedgerWaitingProposalsProjection = cache(async (workspaceId: string): Promise<number> => {
+  return getRequestServices().ledger.countWaitingProposals(workspaceId);
+});
+
+/** The documents and bank transactions behind entries (source panel, "Probleme"). Ids come from
+ * the caller's own entries or controls; `cache()` compares the arrays by reference. */
+export const getLedgerSourcesProjection = cache(async (workspaceId: string, documentIds: readonly string[], transactionIds: readonly string[]): Promise<LedgerSourcesView> => {
+  return getRequestServices().ledger.getSources(workspaceId, { documentIds, transactionIds });
 });
 
 export const getJournalEntryProjection = cache(async (workspaceId: string, entryId: string): Promise<JournalEntryView | null> => {
