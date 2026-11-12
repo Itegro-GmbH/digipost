@@ -15,7 +15,12 @@ Maintenance triggers:
 - The lock rule (what a filing freezes) changes
 - The existing clearing accounts (decisions/0026, decisions/0068) are migrated onto the ledger
 - The export format to the tax advisor is decided
-Last verified: 2026-11-12, phases 1 to 6 implemented including the UI (status updated), against
+Last verified: 2026-11-12, fixes after the acceptance replay and an independent review: the 2970
+carry-forward, the commissionaire-only settlement template, bank-transaction rules by remittance
+text and money direction, the correcting filing taken when booking into a locked period, and
+concurrent writers (migration `0033_flippant_mercury.sql`), against `src/modules/ledger/core/`,
+`src/persistence/use-cases/ledger-use-cases.ts` and `src/modules/ledger/README.md`. Previously
+2026-11-12, phases 1 to 6 implemented including the UI (status updated), against
 `src/app/(app)/dashboard/buchhaltung/**`, `src/modules/ledger/ui/` and
 `src/modules/ledger/README.md`'s "UI". Previously 2026-11-12, phase 3 implemented (the proposal engine with rules and the AI
 advisor, plus the automatic matches of phase 4), against `src/modules/ledger/core/proposals.ts`,
@@ -225,6 +230,16 @@ The sketch above, with these changes:
   The lock's correction path: a draft filing that corrects a submitted one of the same kind opens
   the entries tied to it (`journal_entries.filing_id`) until it is submitted itself. A submitted
   filing is frozen. A submitted USt-VA of a period does not open what an annual statement locks.
+  Booking, creating or editing a booked entry in a locked period ties it to the one draft
+  correction that opens the date by itself; with several, the user chooses.
+- **Years carry their result into equity.** Revenue and expense accounts restart every calendar
+  year. A Summen- und Saldenliste starting in a later year opens the earlier years' result on
+  2970 "Gewinnvortrag vor Verwendung" (added to the SKR 04 seed), so its openings sum to zero and
+  it matches the tax advisor's list, which carries the result there until the shareholders decide
+  on it. No closing entry is written; the carry-forward is computed.
+- **Concurrent writers.** Every write to an entry locks its row and updates it only at the
+  revision it read; one revision number per entry is a unique index. The proposal engine never
+  overwrites an entry a human touched in the meantime.
 
 ### Proposals as implemented (phase 3)
 
@@ -242,10 +257,16 @@ and tax codes. The decisions taken while building it:
   reference out of the ledger): the invoice's line on an open-item account and its payment's
   lines name the same document, which is what makes an automatic match safe. Only that is matched
   without a human (same account, same document, sum zero); combinations are suggestions.
-- **Order for a bank transaction:** confirmed documents, a paired clearing account (app-store
-  payout, supplier charge), a no-document rule, the contact's own open-item account, a
-  shareholder's account, a transfer between own accounts; otherwise no proposal, never a guess.
-  A payment to a shareholder is recognized only through a person-owned account in the chart.
+- **Order for a bank transaction:** confirmed documents (unless one of them has no open-item
+  account, then the next steps decide), a paired clearing account (app-store payout, supplier
+  charge), a no-document rule, the contact's own open-item account, a shareholder's account, a
+  transfer between own accounts; otherwise no proposal, never a guess. A payment to a shareholder
+  is recognized only through a person-owned account in the chart, and only after every explicit
+  rule. A rule's pattern is looked for in the counterparty name and the remittance text (the
+  share capital arrives as "Stammeinlage <Name>" from each shareholder). Only no-document rules
+  book a bank transaction, and only in their direction, read as the side of the books: money in
+  is the revenue side (`outgoing`), money out the expense side (`incoming`). A rule learned from
+  a supplier's invoices therefore never books its refund.
 - **The AI is the last resort for an incoming document's account**, behind a port
   (`LedgerBookingAdvisor`) bound like the payment arbiter (fake, Mistral, not configured). It
   gets the extracted fields and the chart, never the OCR text; its answer is validated in code
@@ -258,6 +279,14 @@ and tax codes. The decisions taken while building it:
   settlement report (deduplicated by `scheduleNow`, decisions/0076), only while the ledger is on.
 - **Platform fees**: Google Play fees default to `rc13b`, others to no tax code, until the tax
   advisor confirms the accounts and codes she prefers (see "Consequences").
+- **The settlement template is for Apple and Google only.** Both app stores sell in their own
+  name on the developer's account (commissionaire model, § 3 (11a) UStG), so the developer's
+  revenue is a supply to the store in Ireland, booked on 4339. Stripe, PayPal, Amazon and other
+  platforms collect for the seller, whose revenue is the sale to the end customer; their reports
+  get no proposal and the sync names the problem `unsupported_platform_settlement` until that
+  booking is decided.
+- **A cancellation books its invoice negated**, group by group, so every revenue and tax account
+  nets to zero whatever the cancellation's own rounding.
 
 ### Cascade verification
 

@@ -14,7 +14,16 @@ Maintenance triggers:
 - A tax code, its USt-VA mapping, or the seed chart changes
 - A new write path touches a ledger table, or a control is added
 - The proposal engine or the UI stage lands (decisions/0080 phases)
-Last verified: 2026-11-12, decisions/0080-ledger-double-entry-bookkeeping.md UI stage, part 2: the
+Last verified: 2026-11-12, fixes from the acceptance replay and the review: bank-transaction rules
+(remittance text, no-document rules only, money direction), the payment fallback for a document
+without an open-item account, cancellations, the commissionaire-only settlement template,
+reverse charge against printed German VAT, rule tax codes by direction, open items at a date, the
+2970 carry-forward, bounded match suggestions, matches on unbooking, deleting and editing, the
+correcting filing taken automatically, row locks and conditional updates (migration
+`0033_flippant_mercury.sql`), advisor upload limits, and the editor's and periods page's retries,
+against `core/`, `ui/`, `src/persistence/use-cases/ledger-use-cases.ts`,
+`src/persistence/repositories/drizzle/ledger-repository.ts` and the tests named under "Tests".
+Previously 2026-11-12, decisions/0080-ledger-double-entry-bookkeeping.md UI stage, part 2: the
 pages `/konten` (living Summen- und Saldenliste), `/konten/[nummer]` (Kontenblatt, "Offene
 Posten"), `/auswertungen/ust`, `/auswertungen/abgleich`, `/auswertungen/zeitraeume`,
 `/einstellungen` (Allgemein, Kontenplan, Regeln), the document page's "Buchhaltung" card, the
@@ -62,14 +71,19 @@ overwrites a booked, dismissed or human-edited entry.
   one-sentence description), the number ranges for owned accounts (bank 1800, 1810 ...; platform
   receivables 1370 ff.; contact clearing accounts 1461 ff.; persons 3511 ff.) and their texts.
 - `core/reports.ts`: `computeBalances` (Summen- und Saldenliste; revenue and expense accounts
-  start every calendar year at zero), `computeAccountSheet` (running balance, counter accounts),
-  `computeOpenItems` (matches, explained remainders, what is open), `computeVatPreview` (bases
+  start every calendar year at zero, and the earlier years' result opens on 2970 "Gewinnvortrag
+  vor Verwendung", a synthetic row when the chart lacks it, so the openings sum to zero),
+  `computeAccountSheet` (running balance, counter accounts; 2970 opens with the same carried
+  result), `computeOpenItems` (matches, explained remainders, what is open; a match settles its
+  lines at a date only when all of them are booked on or before it), `computeVatPreview` (bases
   from tax codes, tax amounts from the tax accounts, Zahllast in Kennzahl 83).
 - `core/controls.ts`: USt-VA periods, `compareBankBalances` (ledger bank account against the real
   bank balance per day, first divergence date), `computeControls`, `derivePeriodStatus`.
 - `core/advisor.ts`: `parseDatevBalanceList` (lenient DATEV Summen- und Saldenliste CSV: `;`,
   German numbers, "S"/"H" in its own column or in the amount, "Saldo Soll"/"Saldo Haben",
-  preamble lines skipped) and `compareWithAdvisor`.
+  preamble lines skipped; at most `MAX_ADVISOR_ROWS` (5000) rows and amounts inside a Postgres
+  `integer`) and `compareWithAdvisor`. A file over `MAX_ADVISOR_FILE_BYTES` (900 KB) is refused
+  by the form and the use case. Every refusal is `advisor_file_invalid`.
 - `core/summary.ts`: `summarizeEntry`, the deterministic one-sentence summary as an i18n key
   (`Ledger.summaries.*`) plus ICU values, never free text. Lines of the same account count once;
   a bank line against an open-item or equity account reads as a payment (`paymentOut`,
@@ -83,9 +97,16 @@ overwrites a booked, dismissed or human-edited entry.
   fitting the direction, a split that adds up), `bookingAdviceCacheKey`, `toCacheableBookingAdvice`,
   and `createFakeLedgerBookingAdvisor` (keyword based, deterministic).
 - `core/open-item-matching.ts`: `findAutoMatches` (same document, sum zero) and
-  `suggestMatchGroups` (same document first, then up to four opposite lines adding up to one).
+  `suggestMatchGroups` (same document first, then one opposite line of exactly the amount, then
+  up to four opposite lines adding up to one). Bounded whatever the account holds: at most
+  `MAX_ANCHORS` (200) lines searched for, `MAX_SEARCH_STEPS` (50 000) lines tried in all, and a
+  stop at `MAX_SUGGESTIONS` (50).
 - `core/rule-learning.ts`: `deriveRuleFromEntry`, the rule "Als Regel speichern" creates.
 - `core/schemas.ts`: the Zod schema of every action input and of the proposal engine's input.
+  `RULE_TAX_CODES_BY_DIRECTION`: a rule's tax code fits its direction (`incoming`, the expense
+  side: `vst19`, `vst7`, `rc13b`, `pass_through`, `not_taxable`, `tax_free`; `outgoing`, the
+  revenue side: `ust19`, `ust7`, `eu_not_taxable`, `not_taxable`, `tax_free`; `any`: only
+  `not_taxable`, `tax_free` or none), enforced by the schema and the rules form.
 - `core/error-codes.ts`: `LEDGER_USE_CASE_ERROR_CODES`, `LEDGER_ACTION_ERROR_CODES`,
   `LEDGER_DB_RAISES` (the messages the custom SQL raises).
 - `server/read-models.ts`: `cache()` projections over `getRequestServices().ledger`.
@@ -167,17 +188,27 @@ overwrites a booked, dismissed or human-edited entry.
   recognized by the data: the workspace-deletion cascade, and entries whose `filing_id` names a
   draft correcting filing of the same kind covering the date. A submitted filing itself is frozen.
   A correction is either a new entry in an open period or "Berichtigte Meldung anlegen" and tying
-  the entries to it; both are deliberate.
+  the entries to it; both are deliberate. Tying is automatic: booking, creating or editing a
+  booked entry dated in a locked period without a `filing_id` takes the one draft correction that
+  opens the date; with several the use case answers `filing_choice_required` and the editor offers
+  "Berichtigte Meldung"; with none the date stays `locked` (the editor links to the periods).
 - **Every change has a revision**, written in the same transaction with the previous state
   (entry and lines). Editing, unbooking or deleting a booked entry needs a reason. A deleted
   entry's revisions stay (`entry_ref`), so a handover's "changes since" still counts it.
+- **One writer at a time.** Every write to an entry reads it `FOR UPDATE` and updates it only
+  while it is still at the revision read (else `stale_revision`); a revision number exists once
+  per entry (unique index `journal_entry_revisions_entry_revision_key`). The proposal engine
+  locks the entry of its source key too and updates only an untouched proposal (proposed, never
+  edited or dismissed), so an edit committed meanwhile is kept, never overwritten.
 - **References out of the ledger are plain uuids** (documents, transactions, bank accounts,
   contacts, users), without a foreign key, for the same reason as `invoices`: a `set null` from a
   deleted document would be an UPDATE the lock refuses. The use case checks each one belongs to
   the caller's workspace before writing it. Ledger-internal references are composite foreign keys
   with `workspace_id`, so a line can never land on another workspace's account.
-- **Open-item matches** are dissolved as a whole when one of their lines is replaced (an edit
-  rewrites an entry's lines). A `match` must sum to zero; an `explained` remainder needs a note.
+- **Open-item matches** are dissolved as a whole when one of their lines changes, and when the
+  entry is unbooked or deleted. An edit leaves identical lines alone and keeps a line (its id and
+  match) whose position, account, amount and document stay the same; only matches of removed
+  lines are dissolved. A `match` must sum to zero; an `explained` remainder needs a note.
 - **Reading other owners' tables** happens only in `LedgerRepository`'s source reads (read-only
   joins on `accounts`, `transactions`, `import_batches`, `documents`, `contacts`) and through
   `repos.contact.findById`. The ledger never writes them, and never books the synthetic
@@ -231,7 +262,10 @@ under the shell's wide layout (`src/modules/dashboard-shell`'s `WIDE_LAYOUT_PREF
   <Kontakt> künftig so vorschlagen" calls `learnLedgerRuleFromEntryAction` after booking (ticked
   for an AI proposal). A locked entry is read-only with "Korrektur buchen" (`/buchung/neu?korrektur=`:
   the lines reversed, dated `firstOpenDate`, `correctionOfEntryId` set) and a link to the periods.
-  `stale_revision` offers "Neu laden". `/buchung/neu?beleg=` prefills from the document (direction,
+  `stale_revision` offers "Neu laden". "Buchen" on a changed proposal saves and then books; when
+  the booking fails after the save, the editor keeps the saved revision, so trying again only
+  books. A printed tax as large as the gross is not used, and the editor says so.
+  `/buchung/neu?beleg=` prefills from the document (direction,
   amount, tax code from a single printed rate or reverse charge, the contact's open-item account or
   3300/1200), `?umsatz=` from the bank transaction (its bank account, the direction by sign).
 - `/dashboard/buchhaltung/journal` (`JournalFilters`, `JournalTable`): every entry, proposals dashed,
@@ -279,7 +313,8 @@ under the shell's wide layout (`src/modules/dashboard-shell`'s `WIDE_LAYOUT_PREF
   Erstattung on the protocol (optional; a warning when it differs from the preview, never a
   block), how many booked entries get locked, proposals that will not be bookable any more, and
   the checkbox "Ich habe die Meldung beim Finanzamt abgegeben"; it creates the draft filing
-  (unless one waits) and submits it. A submitted period shows the lock and "Berichtigte Meldung
+  (unless one waits, or this card created one before a failed submission) and submits it. A
+  submitted period shows the lock and "Berichtigte Meldung
   anlegen", which explains both paths (a correcting filing whose entries may be dated in the
   period, or "Korrektur buchen" in the next open period) and leaves the choice to the tax
   advisor. A correcting draft is submitted the same way. The year's annual statement is the last
@@ -324,33 +359,46 @@ Templates, from certain to uncertain:
   1407/3837 pair) when the document says reverse charge or the supplier is foreign (contact
   country not DE, or a non-DE VAT id) and shows no German VAT; the pass-through amount on its own
   `pass_through` line; with nothing printed the rule's or the AI's code, `not_taxable` for courts
-  and authorities, else `vst19` from the gross with `no_tax_breakdown`. Against: the rule's
+  and authorities, else `vst19` from the gross with `no_tax_breakdown`. A German supplier (contact
+  country DE or a DE VAT id) printing German VAT is booked from the printed breakdown even when
+  the document says reverse charge, with `reverse_charge_conflict`. Against: the rule's
   payment account, else the contact's own open-item account (Meta 1461, Google Ads 1462), else the
   shareholder's account (3511 ff.) when every confirmed payment went to that person, else 3300.
 - **Outgoing invoice issued in Digipost** (`invoice:<id>`, issue date): 1200 (or the contact's
   open-item account) against 4400 `ust19`, 4300 `ust7`, 4339 `eu_not_taxable` (category AE to an
   EU buyer), 4338 `not_taxable` (AE outside the EU, Z, G, O), 4200 `tax_free` (E), per VAT group
-  with the invoice's own totals; a cancellation negates. Its inbox document is not booked again.
+  with the invoice's own totals; a cancellation books the cancelled invoice's groups negated, so
+  every revenue and tax account nets to zero (`invoiceVatGroups` also rounds half away from
+  zero). Its inbox document is not booked again.
 - **Outgoing invoice document** not issued in Digipost (`doc:<id>`): the same accounts from its
   printed tax fields, a rule, or `ust19` from the gross with `no_tax_breakdown`.
 - **Platform report** (`settlement:<documentId>:<YYYY-MM>`, booked on the month end or the
-  report's period end): revenue and refunds on 4339 `eu_not_taxable`, fees on 6855 (Google:
-  `rc13b`) or a rule whose pattern names the platform, against the platform's receivable (1370
-  ff.), the receivable line carrying the report.
+  report's period end), Apple and Google only (the commissionaire model: the store sells in its
+  own name, so the revenue is a supply to it): revenue and refunds on 4339 `eu_not_taxable`, fees
+  on 6855 (Google: `rc13b`) or a rule whose pattern names the platform, against the platform's
+  receivable (1370 ff.), the receivable line carrying the report. Any other platform (Stripe,
+  PayPal, Amazon, other) collects for the seller and needs another booking: no proposal, and the
+  sync names the problem `unsupported_platform_settlement`.
 - **Bank transaction** (`tx:<id>`, on a bank `accounts` row only): the bank's own account (1800,
   1810, ...) against, in this order: the open-item accounts of its confirmed documents
   (allocated amounts, a collective payment split per document, a remainder on the last line with
-  `amount_differs_from_payment`); the account of the clearing account it is paired with (an
-  app-store payout to the platform receivable, carrying the report when exactly one); a
-  no-document rule (or any rule of a counterparty that needs no document per the payments owner:
-  share capital 2900); the contact's own open-item account; a shareholder's account (all name
-  parts of the person in the counterparty name); 1360 for a transfer to another own bank account.
+  `amount_differs_from_payment`; when one of the documents has no open-item account, such as a
+  platform settlement without a receivable, the next steps decide instead); the account of the
+  clearing account it is paired with (an app-store payout to the platform receivable, carrying
+  the report when exactly one); a no-document rule whose pattern is in the counterparty name or
+  the remittance text ("Stammeinlage" to 2900) and whose direction fits the money (money in is
+  the revenue side, `outgoing`; money out the expense side, `incoming`), never a rule learned
+  from documents, so a supplier's refund is not booked by its invoice rule; the contact's own
+  open-item account; a shareholder's account (all name parts of the person in the counterparty
+  name), after every explicit rule; 1360 for a transfer to another own bank account.
   Anything else gets no proposal: an unexplained bank transaction stays a problem.
 
 Warnings: `no_tax_breakdown`, `amount_differs_from_payment`, `possible_pass_through` (notary,
 court or register costs with German VAT and no pass-through amount), `foreign_supplier_with_vat`
 (Finom NL, Apple IE with German VAT), `duplicate_suspect` (same contact, invoice number and
-amount as an earlier document), `ai_unavailable`.
+amount as an earlier document), `ai_unavailable`, `reverse_charge_conflict` (a German supplier's
+printed German VAT next to a reverse-charge note). Problems (no proposal, named after
+"Vorschläge aktualisieren"): `unsupported_platform_settlement`.
 
 **The AI advisor** (`LedgerBookingAdvisor`) is asked for an account from the workspace's own
 expense accounts, a tax code and one German sentence, optionally a split (a court fee and a
@@ -360,13 +408,19 @@ a hash of the whole question and the advisor's version; the same question is nev
 a changed document, chart or prompt is. A sync asks at most 40 questions; the rest wait for the
 next run, which the job schedules right away. A failing call is not cached.
 
-**Rules**: a proposal from a rule stores `rule:<id>` as its reason; booking it increments the
-rule's `hits`. `learnRuleFromEntry` ("Als Regel speichern") creates or updates the rule of the
-entry's contact (an invoice: account, tax code, the contact's or shareholder's open-item account)
-or of a bank transaction's counterparty (a no-document rule by name pattern).
+**Rules**: a rule's direction names the side it books: `incoming` the expense side (incoming
+invoices, money out), `outgoing` the revenue side (outgoing invoices, money in), `any` both. A
+proposal from a rule stores `rule:<id>` as its reason; booking it increments the rule's `hits`.
+`learnRuleFromEntry` ("Als Regel speichern") creates or updates the rule of the entry's contact
+(an invoice: account, tax code, the contact's or shareholder's open-item account) or of a bank
+transaction's counterparty (a no-document rule by name pattern, in the money's direction). An
+existing rule keeps its direction unless the learned tax code does not fit it.
 
 **Open items**: after every sync and every booking, `autoMatchOpenItems` matches the booked lines
-of an open-item account that carry the same document and sum to zero (created by no user).
+of an open-item account that carry the same document and sum to zero (created by no user). After
+a booking it runs once the booking committed; a failure there is logged and never turns the
+booking into an error. `bulkBook` books each entry in its own transaction and reports any failure
+with that entry (`unknown` for an unexpected one); the rest are still booked.
 Everything else is only suggested: `suggestMatches(accountId)` (Google Ads 10 + 50 + 36,57 against
 96,57; one Google Play payout against three reports).
 
@@ -396,8 +450,11 @@ unbooked checks start at the ledger's start date.
   match) is left as it is; the engine never deletes proposals.
 - A payment to a shareholder is recognized only through a person-owned account in the chart
   (`owner_type = person`); workspace members are not consulted.
-- `payment_no_document_rules` carry no target account, so they alone produce no proposal; they
-  only let a ledger rule of the same counterparty apply to a transaction without a document.
+- `payment_no_document_rules` carry no target account, so they alone produce no proposal; a bank
+  transaction is booked by a ledger rule only when that rule is itself a no-document rule.
+- Rules learned from bank transactions before 2026-11-12 used `incoming` for money in; such a
+  rule now applies to money out only and needs its direction changed (or `any`) in the rules
+  settings.
 - Platform fee tax codes are a default (`rc13b` for Google, none otherwise) until the tax
   advisor confirms them (decisions/0080 "Consequences").
 
@@ -409,7 +466,8 @@ Tables `ledger_settings`, `ledger_accounts`, `journal_entries`, `journal_lines`,
 `ledger_advisor_balance_lines`, `ledger_booking_advice` (`src/persistence/schema/ledger.ts`, migration
 `0028_illegal_mad_thinker.sql`, custom migrations `0029_ledger_balanced_entries.sql` and
 `0030_ledger_filing_lock.sql`, phase 3's `0032_icy_medusa.sql` with `ledger_booking_advice` and
-`journal_lines.document_id`), written only by
+`journal_lines.document_id`, `0033_flippant_mercury.sql` with the unique revision index), written
+only by
 `src/persistence/repositories/drizzle/ledger-repository.ts`. Every table cascades from
 `workspaces.id` (decisions/0080's "Cascade verification").
 
@@ -449,3 +507,15 @@ Zahllast warning, draft then submit, the correction guide, the handover),
 the new reads. End to end: `tests/e2e/ledger.spec.ts` (from the finance page's link through
 enabling, booking the share capital, the journal, Konten 2900 in both views, its Kontenblatt,
 the reports and settings pages; a member gets 404 on every ledger route and no nav entry).
+Fixes after the acceptance replay: `tests/proposals.test.ts` ("fixes from the acceptance replay
+and the review": the three share-capital credits, the Meta top-up fallback, the cancellation of
+0,50 at 19 % plus 1,50 at 7 %, the Stripe report, the refund, reverse charge against printed
+VAT), `tests/reports.test.ts` (the 2970 carry-forward, a match across the cut-off date),
+`tests/open-item-matching.test.ts` (3000 lines under 0,5 s), `tests/schemas.test.ts` and
+`tests/rules-settings.test.tsx` (tax codes by direction), `tests/advisor.test.ts` and
+`tests/advisor-comparison.test.tsx` (limits), `tests/entry-editor.test.tsx` and
+`tests/periods-client.test.tsx` (retries, the correcting filing choice),
+`src/persistence/tests/ledger-integrity.db.test.ts` (matches on unbooking, deleting and editing,
+the correcting filing flow, concurrent writers on two connections, the unique revision index,
+`bulkBook` and the matching after a booking) and `src/persistence/tests/ledger-use-cases.db.test.ts`
+(the year boundary in the list, the Kontenblatt and the advisor comparison).
