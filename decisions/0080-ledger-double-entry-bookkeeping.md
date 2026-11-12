@@ -15,7 +15,10 @@ Maintenance triggers:
 - The lock rule (what a filing freezes) changes
 - The existing clearing accounts (decisions/0026, decisions/0068) are migrated onto the ledger
 - The export format to the tax advisor is decided
-Last verified: 2026-11-12, phase 2 implemented (tax fields on `documents`,
+Last verified: 2026-11-12, phase 3 implemented (the proposal engine with rules and the AI
+advisor, plus the automatic matches of phase 4), against `src/modules/ledger/core/proposals.ts`,
+`src/persistence/use-cases/ledger-use-cases.ts` and migration `0032_icy_medusa.sql`. Previously
+2026-11-12, phase 2 implemented (tax fields on `documents`,
 `DocumentRepository.listForLedger`), against `src/persistence/schema/documents.ts` and
 `src/modules/documents/core/tax-fields.ts`. Previously 2026-11-12, stage 1 implemented (core, persistence, use cases, actions): status,
 "Model as implemented" and "Cascade verification" added, against `src/persistence/schema/ledger.ts`,
@@ -28,13 +31,15 @@ reconciliation of the tax advisor's evaluations for June to September 2026
 
 ## Status
 
-Accepted, being implemented (stage 1: core). Stage 1 is the ledger core in `src/modules/ledger`
+Accepted, being implemented (stage 1: core; phases 2 and 3 implemented). Stage 1 is the ledger core in `src/modules/ledger`
 and `src/persistence/use-cases/ledger-use-cases.ts`: the tables below, the SKR 04 seed, tax codes
 and their expansion, entries with revisions, booking, open-item matches, booking rules, filings
 and the lock, handovers, the tax advisor's balance lists, every report and control, and the
 Server Actions. Phase 2 (the new extraction fields) is implemented: see "Documents need more
-extracted fields" below. Not yet: the proposal engine (phase 3, which writes through
-`upsertProposal`) and every page. Builds on decisions/0024-accounts-and-transactions.md,
+extracted fields" below. Phase 3 (proposals from documents, bank transactions, settlement reports
+and outgoing invoices, with rules and the AI) is implemented, together with phase 4's automatic
+and suggested open-item matches: see "Proposals as implemented (phase 3)" below. Not yet: moving
+the existing clearing accounts onto the ledger (the rest of phase 4) and every page. Builds on decisions/0024-accounts-and-transactions.md,
 decisions/0026-platform-settlements.md, decisions/0068-supplier-clearing-accounts.md,
 decisions/0066-abschluss-check-and-export.md and decisions/0079-outgoing-invoices.md.
 
@@ -213,6 +218,39 @@ The sketch above, with these changes:
   the entries tied to it (`journal_entries.filing_id`) until it is submitted itself. A submitted
   filing is frozen. A submitted USt-VA of a period does not open what an annual statement locks.
 
+### Proposals as implemented (phase 3)
+
+`src/modules/ledger/README.md` ("Proposal engine") lists every template with its exact accounts
+and tax codes. The decisions taken while building it:
+
+- **A pure engine over a snapshot.** `buildProposals` gets the sources, the chart, the active
+  rules, the source keys a human decided on and the AI's validated answers, and returns drafts;
+  `syncProposals` reads the snapshot through the owners' read methods
+  (`TransactionRepository.listForLedger` and `SettlementLineRepository.listForLedger` were added
+  for it, `DocumentRepository.listForLedger` gained the summary) and writes through
+  `upsertProposal`. Proposals are idempotent by source key; a booked, edited or dismissed entry
+  is never touched, and a decided key is not even recomputed (no AI question for it).
+- **The line carries the open item.** `journal_lines.document_id` (plain uuid, like every
+  reference out of the ledger): the invoice's line on an open-item account and its payment's
+  lines name the same document, which is what makes an automatic match safe. Only that is matched
+  without a human (same account, same document, sum zero); combinations are suggestions.
+- **Order for a bank transaction:** confirmed documents, a paired clearing account (app-store
+  payout, supplier charge), a no-document rule, the contact's own open-item account, a
+  shareholder's account, a transfer between own accounts; otherwise no proposal, never a guess.
+  A payment to a shareholder is recognized only through a person-owned account in the chart.
+- **The AI is the last resort for an incoming document's account**, behind a port
+  (`LedgerBookingAdvisor`) bound like the payment arbiter (fake, Mistral, not configured). It
+  gets the extracted fields and the chart, never the OCR text; its answer is validated in code
+  and cached per document under a hash of the question and the advisor's version
+  (`ledger_booking_advice`, decisions/0077's pattern). Without a usable answer the template
+  default (6300) is proposed with `ai_unavailable`.
+- **Rules count their hits** when a proposal they produced is booked (`originReason` is
+  `rule:<id>`); "Als Regel speichern" creates or updates the rule of a contact or counterparty.
+- **Triggers.** An action, and a `ledger-sync` job scheduled after every matching run and every
+  settlement report (deduplicated by `scheduleNow`, decisions/0076), only while the ledger is on.
+- **Platform fees**: Google Play fees default to `rc13b`, others to no tax code, until the tax
+  advisor confirms the accounts and codes she prefers (see "Consequences").
+
 ### Cascade verification
 
 Every ledger table cascades from `workspaces.id`, so a workspace deletion removes the books in the
@@ -234,6 +272,7 @@ none is left:
 - `ledger_handovers`
 - `ledger_advisor_balances`
 - `ledger_advisor_balance_lines`
+- `ledger_booking_advice` (phase 3)
 
 ## Phases
 

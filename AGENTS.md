@@ -9,7 +9,10 @@ Maintenance triggers:
 - Repository-wide safety or workflow rules change
 - STRUCTURE.md or the structure checker lands and changes what is machine-enforced
 - Documentation governance rules in DOC_RULES.md change
-Last verified: 2026-11-12, decisions/0080-ledger-double-entry-bookkeeping.md (stage 1): added the
+Last verified: 2026-11-12, decisions/0080-ledger-double-entry-bookkeeping.md phase 3 (proposal
+engine): `ledger_booking_advice` added to the ledger's tables, the AI booking advisor to the
+"Mistral and personal data" rule, and the ledger's read-only sources (settlement lines, issued
+invoices) to its owner bullet. Previously 2026-11-12, decisions/0080 (stage 1): added the
 `src/modules/ledger` owner, its tables to "only the owning module writes", and the "Filed periods
 are locked" rule. Previously 2026-11-05, decisions/0079-outgoing-invoices.md: added the `src/modules/invoicing`
 owner, its tables to "only the owning module writes", and the "Issued invoices are append-only"
@@ -119,8 +122,11 @@ detail; `decisions/README.md` indexes the ADR behind each one):
   other finance owners (`finance.read`/`finance.manage`): the SKR 04 chart, journal entries with
   tax codes and a revision per change, open-item matches, booking rules, filings that lock their
   period, handovers to the tax advisor and her uploaded balance lists, the reports and controls.
-  It reads `accounts`/`transactions`/`import_batches`/`documents`/`contacts` read-only and never
-  books the synthetic transactions on clearing `accounts` rows.
+  It reads `accounts`/`transactions`/`import_batches`/`settlement_lines`/`documents`/`contacts`/
+  `invoices`/`payment_aliases`/`payment_no_document_rules` read-only (through their owners' read
+  methods or read joins) and never books the synthetic transactions on clearing `accounts` rows.
+  Its proposal engine (phase 3, `syncProposals`, the `ledger-sync` job) only ever writes
+  `proposed` entries keyed by source and never touches a booked, edited or dismissed one.
 - `src/modules/dashboard-shell`, `src/modules/sign-in`, `src/platform/auth`,
   `src/platform/mailer`, `src/platform/api-pipeline`, `src/platform/observability`,
   `src/platform/env`, `src/persistence`, `src/shared/ui-primitives`, `src/i18n` - the
@@ -195,8 +201,8 @@ Digipost-specific invariants a change must not silently break:
   `src/modules/invoicing`), and `ledger_settings`/`ledger_accounts`/`journal_entries`/
   `journal_lines`/`journal_entry_revisions`/`ledger_open_item_matches`/
   `ledger_open_item_match_lines`/`ledger_booking_rules`/`ledger_filings`/`ledger_handovers`/
-  `ledger_advisor_balances`/`ledger_advisor_balance_lines` (owner: `src/modules/ledger`) as to
-  any other table.
+  `ledger_advisor_balances`/`ledger_advisor_balance_lines`/`ledger_booking_advice` (owner:
+  `src/modules/ledger`) as to any other table.
 - **Issued invoices are append-only (GoBD).** A row in `invoices` or `invoice_events` is inserted
   once and never updated or deleted; a correction is a cancellation, i.e. a NEW numbered invoice
   pointing at the original (decisions/0079-outgoing-invoices.md). The database enforces it (a
@@ -250,7 +256,11 @@ Digipost-specific invariants a change must not silently break:
   through this pipeline is explicitly blocked on that paperwork landing first
   (decisions/0016-processing-pipeline-and-ai.md's "Data protection note", README.md's
   "Before going to production"). Do not treat "the fake adapter works in tests" as
-  evidence the real integration is compliance-ready. The same applies to Resend as the
+  evidence the real integration is compliance-ready. The ledger's AI booking advisor
+  (decisions/0080 phase 3, `src/platform/mistral/server/mistral-ledger-booking-advisor.ts`) falls
+  under the same rule; it is sent only a document's extracted fields (sender, country, VAT id,
+  title, summary, amounts, tax breakdown, invoice number) and the workspace's chart, never the
+  OCR text, and must stay that way. The same applies to Resend as the
   receiver of the E-Mail-Eingang (`src/platform/inbound-mail`, decisions/0075-email-intake.md):
   incoming mail (sender, subject, body, attachments) passes through and is stored by Resend,
   no DPA with Resend exists yet and its data residency is unclear, so real customer mail

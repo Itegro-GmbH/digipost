@@ -18,7 +18,15 @@ Maintenance triggers:
 - The payment arbiter's prompt or JSON contract changes (decisions/0023-payment-matching.md, F3a)
 - The payment arbiter's prompt starts showing a value outside its two fingerprint samples'
   shape (`paymentArbiterPromptFingerprint`, decisions/0077-arbiter-answer-cache.md)
-Last verified: 2026-11-12, decisions/0080-ledger-double-entry-bookkeeping.md phase 2: the
+- The ledger booking advisor's prompt or JSON contract changes (decisions/0080 phase 3)
+Last verified: 2026-11-12, decisions/0080-ledger-double-entry-bookkeeping.md phase 3: the ledger
+booking advisor (`server/get-ledger-booking-advisor.ts`, `server/mistral-ledger-booking-advisor.ts`,
+`server/ledger-booking-advisor-prompts.ts`), the payment arbiter's pattern exactly: the same
+env selection (fake, Mistral, not configured), `MISTRAL_CHAT_MODEL`, `temperature: 0`, JSON
+output, and a `version` of `mistral:<model>:<prompt fingerprint>` that is part of the ledger's
+answer-cache key. It is sent a document's extracted fields and the workspace's expense accounts,
+never the OCR text; validation of the answer stays in `@/modules/ledger`
+(`validateBookingAdvice`). Previously 2026-11-12, decisions/0080 phase 2: the
 `"invoice"` block (`INVOICE_JSON_FIELDS` in `server/prompts.ts`, now shared by the ungated
 `SYSTEM_PROMPT` and both guided prompts) also asks for `netTotalAmount`, `taxTotalAmount`,
 `taxBreakdown[{ rate, netAmount, taxAmount }]`, `passThroughAmount`, `reverseCharge`,
@@ -119,7 +127,8 @@ production deploy must fail loudly, never silently simulate AI output).
   `isFakeAiProviderActive()` (the UI's "Testmodus: KI-Simulation aktiv" hint),
   `resetAiAdaptersForTests()`, plus (F1a) `getIntakeClassifier()`/
   `resetIntakeClassifierForTests()` and (F3a) `getPaymentArbiter()`/
-  `resetPaymentArbiterForTests()` - each a separate getter file for the reason given in that
+  `resetPaymentArbiterForTests()`, and (decisions/0080 phase 3) `getLedgerBookingAdvisor()`/
+  `resetLedgerBookingAdvisorForTests()` - each a separate getter file for the reason given in that
   file's own header comment, all re-exported from this one privileged entrypoint.
 
 ## Structure
@@ -184,6 +193,14 @@ production deploy must fail loudly, never silently simulate AI output).
 - `server/get-payment-arbiter.ts` - F3a's env-based provider selection, mirroring
   `get-ai-adapters.ts`/`get-intake-classifier.ts` exactly (`AI_PROVIDER` precedence, `globalThis`
   memoization, a "not configured" adapter in production with no key).
+- `server/ledger-booking-advisor-prompts.ts`, `server/mistral-ledger-booking-advisor.ts`,
+  `server/get-ledger-booking-advisor.ts` (decisions/0080 phase 3) - the real
+  `LedgerBookingAdvisor` (`@/modules/ledger`'s port) and its getter, the payment arbiter's three
+  files copied in shape: German system prompt listing the allowed tax codes, the document's
+  extracted fields and the workspace's expense accounts inside the guarded `BELEG` section,
+  `temperature: 0`, `response_format: json_object`, a lenient parse into the RAW
+  `BookingAdviceRaw` (validated by `@/modules/ledger`'s `validateBookingAdvice`, never here), and a
+  `version` of `mistral:<model>:<ledgerBookingAdvisorPromptFingerprint()>`.
 
 ## Env vars
 
@@ -264,6 +281,10 @@ composition-root work is the next consumer of either.
   `<<<INPUT-<hex> END>>>` delimiters, and neutralization of a delimiter-shaped forgery injected
   into the remittance text. decisions/0077: `paymentArbiterPromptFingerprint()` is a stable
   16-hex-character value despite the per-call random delimiters.
+- `tests/mistral-ledger-booking-advisor.test.ts`, `tests/get-ledger-booking-advisor.test.ts`
+  (decisions/0080 phase 3): the request shape (model, `temperature: 0`, `json_object`, only the
+  extracted fields and the chart in the prompt), the version fingerprint, a lenient parse that
+  validation then rejects, no call without accounts, and the env selection.
 - `tests/get-payment-arbiter.test.ts` (F3a): the same env-boundary/caching pattern
   `src/platform/object-storage/tests/get-object-storage.test.ts` established - `AI_PROVIDER=fake`,
   no-key-outside-production, no-key-in-production (`ai_not_configured`), and caching across
@@ -274,7 +295,8 @@ composition-root work is the next consumer of either.
 No production Mistral account is provisioned; `MISTRAL_API_KEY` is unset in every
 environment this repository controls (local, CI, the Docker test stack), so the real
 adapters (`server/mistral-ocr-engine.ts`/`server/mistral-analyzer.ts`/
-`server/mistral-intake-classifier.ts`/`server/mistral-payment-arbiter.ts`) are exercised only
+`server/mistral-intake-classifier.ts`/`server/mistral-payment-arbiter.ts`/
+`server/mistral-ledger-booking-advisor.ts`) are exercised only
 by their own unit tests against an injected `fetchImpl`, never against the live API. Sending
 real customer document content to Mistral (an EU provider) in production needs a
 data-processing agreement and a privacy-policy update first - explicitly out of scope for
