@@ -373,9 +373,16 @@ Templates, from certain to uncertain:
   answers then) carries `tax_unverified`, unless a rule with a tax code decides (the rule's code
   is booked, no warning); `core/tax-evidence.ts` holds the test. The pass-through amount on its own
   `pass_through` line; with nothing printed the rule's or the AI's code, `not_taxable` for courts
-  and authorities, else `vst19` from the gross with `no_tax_breakdown`. A German supplier (contact
-  country DE or a DE VAT id) printing German VAT is booked from the printed breakdown even when
-  the document says reverse charge, with `reverse_charge_conflict`. Against: the rule's
+  and authorities, else `vst19` from the gross with `no_tax_breakdown`. A complete printed
+  breakdown whose net plus tax plus pass-through falls short of the total by at most 10 % of it
+  (a notary's two partial invoices with only one pass-through sum extracted) is booked as printed,
+  the remainder as additional pass-through, with `tax_inconsistent`. When the gap is negative or
+  larger, the figures are not used, but a document printing a positive German tax never gets the
+  AI's `pass_through`, `not_taxable` or the like: the printed rate's `vst19`/`vst7` from the gross,
+  with `tax_inconsistent`. Any supplier (German or foreign) printing a positive German VAT is
+  booked from the printed figures even when the document says reverse charge (an OCR false
+  positive, a conditional footnote like Finom's), with `reverse_charge_conflict`, plus
+  `foreign_supplier_with_vat` for a foreign one. Against: the rule's
   payment account, else the contact's own open-item account (Meta 1461, Google Ads 1462), else the
   shareholder's account (3511 ff.) when every confirmed payment went to that person, else 3300.
 - **Outgoing invoice issued in Digipost** (`invoice:<id>`, issue date): 1200 (or the contact's
@@ -414,8 +421,9 @@ Templates, from certain to uncertain:
 Warnings: `no_tax_breakdown`, `amount_differs_from_payment`, `possible_pass_through` (notary,
 court or register costs with German VAT and no pass-through amount), `foreign_supplier_with_vat`
 (Finom NL, Apple IE with German VAT), `duplicate_suspect` (same contact, invoice number and
-amount as an earlier document), `ai_unavailable`, `reverse_charge_conflict` (a German supplier's
-printed German VAT next to a reverse-charge note), `tax_unverified` (reverse charge without a
+amount as an earlier document), `ai_unavailable`, `reverse_charge_conflict` (printed German VAT
+next to a reverse-charge note), `tax_inconsistent` (the printed figures do not add up to the
+total: the remainder booked as pass-through, or the printed rate over an AI guess), `tax_unverified` (reverse charge without a
 printed tax figure or a reverse-charge note: Apple Ireland charges German VAT, which only its
 printed figures show; "Steuer nicht erkannt"). Any warning keeps a proposal out of "Sicher", so a
 template proposal with `tax_unverified` is under "Bitte ansehen" too. Problems (no proposal, named after

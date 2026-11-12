@@ -499,6 +499,73 @@ describe("buildProposals: no reverse charge guessed without tax figures", () => 
   });
 });
 
+describe("buildProposals: printed tax wins over a pass-through or reverse-charge guess", () => {
+  const notaryAdvice = new Map<string, BookingAdvice | null>([["notary", { accountNumber: "6825", taxCode: "pass_through", split: null, reason: "Notarkosten." }]]);
+  // As extracted in production: two partial invoices, only one of the two "Summe durchlaufende
+  // Posten | 4,50" lines, so net + tax + pass-through is 4,50 short of the total.
+  const notary = doc("notary", {
+    contactId: NOTARY,
+    contactName: "Notar Dr. Beispiel",
+    title: "Kostenrechnung Notar",
+    totalAmountCents: 81_583,
+    taxBreakdown: [{ ratePercent: 19, netCents: 67_800, taxCents: 12_883 }],
+    netTotalCents: 67_800,
+    taxTotalCents: 12_883,
+    passThroughCents: 450,
+  });
+
+  it("notary with one of two pass-through sums: books the printed breakdown, the rest as pass-through, flagged", async () => {
+    const draft = draftFor(buildProposals(snapshot({ accounts: itegroChart({ person: false }), documents: [notary] }), notaryAdvice), "doc:notary");
+    expect(booked(draft)).toEqual([
+      ["6825", 67_800, "vst19", null],
+      ["1406", 12_883, "vst19", null],
+      ["6825", 900, "pass_through", null],
+      ["3300", -81_583, null, "notary"],
+    ]);
+    expect(draft.warnings).toEqual(["tax_inconsistent"]);
+  });
+
+  it("a gap larger than 10 % of the total is no pass-through: the AI's pass_through is overridden by the printed rate", async () => {
+    const draft = draftFor(buildProposals(snapshot({ accounts: itegroChart({ person: false }), documents: [{ ...notary, totalAmountCents: 100_000, passThroughCents: null }] }), notaryAdvice), "doc:notary");
+    expect(draft.entry.lines[0]).toMatchObject({ accountNumber: "6825", amountCents: 100_000, taxCode: "vst19", amountMode: "gross" });
+    expect(booked(draft).map((line) => line[2])).not.toContain("pass_through");
+    expect(draft.warnings).toContain("tax_inconsistent");
+  });
+
+  it("a negative gap: the AI's not_taxable never replaces printed tax", async () => {
+    const advice = new Map<string, BookingAdvice | null>([["notary", { accountNumber: "6825", taxCode: "not_taxable", split: null, reason: "Notarkosten." }]]);
+    const draft = draftFor(buildProposals(snapshot({ accounts: itegroChart({ person: false }), documents: [{ ...notary, totalAmountCents: 70_000, passThroughCents: null }] }), advice), "doc:notary");
+    expect(draft.entry.lines[0]).toMatchObject({ amountCents: 70_000, taxCode: "vst19", amountMode: "gross" });
+    expect(draft.warnings).toContain("tax_inconsistent");
+  });
+
+  it("Finom with a conditional reverse-charge footnote and printed 19 %: vst19 as printed, flagged twice", async () => {
+    const result = await plan(
+      snapshot({
+        documents: [
+          doc("finom", { contactId: FINOM, contactName: "Finom B.V.", contactCountry: "NL", contactVatId: "NL862287339B01", title: "Kontoführung", reverseCharge: true, totalAmountCents: 12_838, taxBreakdown: [{ ratePercent: 19, netCents: 10_788, taxCents: 2050 }] }),
+        ],
+      }),
+    );
+    const draft = draftFor(result, "doc:finom");
+    expect(draft.warnings).toEqual(["foreign_supplier_with_vat", "reverse_charge_conflict"]);
+    expect(booked(draft)).toEqual([
+      ["6855", 10_788, "vst19", null],
+      ["1406", 2050, "vst19", null],
+      ["3300", -12_838, null, "finom"],
+    ]);
+  });
+
+  it("Meta with the reverse-charge note and no printed tax stays rc13b without a warning", async () => {
+    const result = await plan(
+      snapshot({ documents: [doc("meta", { contactId: META, contactName: "Meta Platforms Ireland Ltd.", contactCountry: "IE", contactVatId: "IE9692928F", reverseCharge: true, totalAmountCents: 6000 })] }),
+    );
+    const draft = draftFor(result, "doc:meta");
+    expect(draft.warnings).toEqual([]);
+    expect(draft.entry.lines.map((line) => line.taxCode ?? null)).toEqual(["rc13b", null]);
+  });
+});
+
 describe("buildProposals: outgoing invoices", () => {
   it("an invoice issued in Digipost at 19 %: receivables 1200 against 4400 and 3806; its inbox document is not booked twice", async () => {
     const groups = invoiceVatGroups([{ quantity: "10", unitPrice: "95.00", category: "S", ratePercent: 19 }], { netCents: 95_000, vatCents: 18_050 });

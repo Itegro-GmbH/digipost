@@ -369,4 +369,15 @@ decision above; each is a correction within it.
   prompt names the typical accounts (bank and payment-service fees on 6855, authority and court
   fees on 6300 `not_taxable`, a notary on 6825 with pass-through fees) and asks for no tax code
   rather than a guess (`src/modules/ledger/README.md`, "Proposal engine").
+- **Printed tax wins.** After the backfill, a notary's document of two partial invoices was
+  extracted with only one of its two pass-through sums, so the figures missed the total by 4,50
+  and the AI booked everything as pass-through, no input tax at all; Finom's conditional footnote
+  ("..., sollte sich der Empfänger außerhalb der Niederlanden befinden") set reverse charge next
+  to a printed 19 %. A complete breakdown short of the total by at most 10 % is now booked as
+  printed with the remainder as pass-through (`tax_inconsistent`); a printed positive tax is never
+  replaced by an AI's `pass_through`/`not_taxable`; a reverse-charge flag next to printed German
+  VAT loses for any supplier (`reverse_charge_conflict`). The extraction sums every printed
+  pass-through amount itself and ignores a conditional reverse-charge sentence
+  (`src/modules/ledger/README.md`, "Proposal engine"; `src/modules/documents/README.md`, "Tax
+  fields").
 

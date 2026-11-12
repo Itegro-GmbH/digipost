@@ -47,8 +47,8 @@ const TAX_JSON_FIELDS = `    "netTotalAmount": "<Nettobetrag gesamt GENAU wie ge
         "taxAmount": "<Steuerbetrag zu diesem Steuersatz GENAU wie gedruckt oder null>"
       }
     ] (eine Zeile je gedrucktem Steuersatz, nur was wirklich gedruckt ist; leeres Array [], wenn keine Aufschlüsselung gedruckt ist),
-    "passThroughAmount": "<Summe durchlaufender Posten / Auslagen ohne USt GENAU wie gedruckt, oder null>",
-    "reverseCharge": <true, wenn das Dokument auf die Steuerschuldnerschaft des Leistungsempfängers (Reverse Charge, § 13b UStG) hinweist, sonst false>,
+    "passThroughAmount": ["<Summe durchlaufender Posten / Auslagen ohne USt GENAU wie gedruckt>"] (JEDE gedruckte Summe durchlaufender Posten als eigener Eintrag: enthält das Dokument mehrere Teilrechnungen mit je einer Zeile \"Summe durchlaufende Posten\", gehört jede dieser Zeilen in die Liste, auch wenn die Beträge gleich sind; ist zusätzlich eine Gesamtsumme aller durchlaufenden Posten gedruckt, nur diese eine; leeres Array [], wenn keine gedruckt ist),
+    "reverseCharge": <true, wenn das Dokument auf die Steuerschuldnerschaft des Leistungsempfängers (Reverse Charge, § 13b UStG) für DIESE Rechnung hinweist, sonst false. Eine bedingte Erläuterung ist KEIN solcher Hinweis, z. B. eine Fußnote \"..., sollte sich der Empfänger außerhalb der Niederlande befinden\" oder \"falls/wenn/if/should ...\"; weist das Dokument deutsche Umsatzsteuer aus, ist es in der Regel false>,
     "serviceDate": "<Leistungsdatum/Lieferdatum im Format YYYY-MM-DD oder null>",
     "servicePeriodFrom": "<Beginn des Leistungszeitraums im Format YYYY-MM-DD oder null>",
     "servicePeriodTo": "<Ende des Leistungszeitraums im Format YYYY-MM-DD oder null>"`;

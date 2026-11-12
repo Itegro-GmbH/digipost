@@ -102,6 +102,13 @@ describe("toExtractedTaxFields", () => {
     expect(fields).toMatchObject({ netTotalCents: 67798, taxTotalCents: 12885, passThroughCents: 900, reverseCharge: false });
   });
 
+  it("sums the pass-through amounts of several partial invoices, each as printed", () => {
+    expect(toExtractedTaxFields({ passThroughAmount: ["4,50 EUR", "4,50 EUR"] }).passThroughCents).toBe(900);
+    expect(toExtractedTaxFields({ passThroughAmount: ["4,50", "kein Betrag", 3] }).passThroughCents).toBe(450);
+    expect(toExtractedTaxFields({ passThroughAmount: [] }).passThroughCents).toBeNull();
+    expect(toExtractedTaxFields({ passThroughAmount: "9,00 EUR" }).passThroughCents).toBe(900);
+  });
+
   it("reads reverseCharge only from an explicit boolean", () => {
     expect(toExtractedTaxFields({ reverseCharge: true }).reverseCharge).toBe(true);
     expect(toExtractedTaxFields({ reverseCharge: "true" }).reverseCharge).toBe(true);
@@ -131,6 +138,19 @@ describe("detectReverseChargeNote", () => {
     "This supply is not subject to reverse charge.",
   ])("ignores the negated %j", (text) => {
     expect(detectReverseChargeNote(text)).toBe(false);
+  });
+
+  it("ignores a conditional sentence: Finom's footnote is no reverse-charge invoice", () => {
+    const finom =
+      "Dienstleistungen, für die Mehrwertsteuer/reverse charge anfallen, sollte sich der Empfänger außerhalb der Niederlanden befinden ...";
+    expect(detectReverseChargeNote(finom)).toBe(false);
+    expect(detectReverseChargeNote("If the customer is a business in another EU member state, reverse charge applies.")).toBe(false);
+    expect(detectReverseChargeNote("Falls Sie Unternehmer im EU-Ausland sind, gilt § 13b UStG.")).toBe(false);
+    expect(detectReverseChargeNote("The recipient should account for the VAT under reverse charge.")).toBe(false);
+  });
+
+  it("still finds a real note next to a conditional sentence", () => {
+    expect(detectReverseChargeNote("Wenn Sie Fragen haben, rufen Sie uns an. Steuerschuldnerschaft des Leistungsempfängers.")).toBe(true);
   });
 
   it("still finds a note after a negated one elsewhere on the page", () => {
