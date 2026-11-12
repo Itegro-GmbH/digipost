@@ -385,7 +385,9 @@ export function ruleForTransaction(rules: readonly ProposalRule[], tx: ProposalT
 
 type Target = { accountNumber: string; taxCode: TaxCode | null; split: BookingAdvice["split"]; fromRule: boolean; taxUnverified?: boolean };
 
-function usableBreakdown(entries: readonly ProposalTaxBreakdownEntry[], expectedGross: number): CompleteBreakdownEntry[] | null {
+/** The printed breakdown when every rate with an amount has its net (and, unless 0 %, its tax),
+ * whatever it adds up to. */
+function completeBreakdown(entries: readonly ProposalTaxBreakdownEntry[]): CompleteBreakdownEntry[] | null {
   const relevant = entries.filter((entry) => (entry.netCents ?? 0) !== 0 || (entry.taxCents ?? 0) !== 0);
   if (relevant.length === 0) return null;
   const complete: CompleteBreakdownEntry[] = [];
@@ -394,8 +396,30 @@ function usableBreakdown(entries: readonly ProposalTaxBreakdownEntry[], expected
     if (entry.taxCents === null && entry.ratePercent !== 0) return null;
     complete.push({ ratePercent: entry.ratePercent, netCents: entry.netCents, taxCents: entry.taxCents ?? 0 });
   }
-  const gross = complete.reduce((sum, entry) => sum + entry.netCents + entry.taxCents, 0);
-  return gross === expectedGross ? complete : null;
+  return complete;
+}
+
+function grossOf(entries: readonly CompleteBreakdownEntry[]): number {
+  return entries.reduce((sum, entry) => sum + entry.netCents + entry.taxCents, 0);
+}
+
+function usableBreakdown(entries: readonly ProposalTaxBreakdownEntry[], expectedGross: number): CompleteBreakdownEntry[] | null {
+  const complete = completeBreakdown(entries);
+  return complete && grossOf(complete) === expectedGross ? complete : null;
+}
+
+/** The largest share of the total a gap between the printed figures and the total may have to
+ * still be booked as additional pass-through (`tax_inconsistent`): a notary's second partial
+ * invoice's court fees, not a misread figure. */
+const MAX_PASS_THROUGH_REMAINDER_SHARE = 0.1;
+
+/** The German VAT rate the document prints a positive tax for (the rate with the most tax), or
+ * 19 for a printed positive tax total without a rate; `null` when no positive tax is printed. */
+function printedVatRate(doc: ProposalDocument): 19 | 7 | null {
+  const taxed = (doc.taxBreakdown ?? []).filter((entry) => (entry.taxCents ?? 0) > 0 && (entry.ratePercent === 19 || entry.ratePercent === 7));
+  if (taxed.length > 0) return taxed.reduce((best, entry) => (entry.taxCents! > best.taxCents! ? entry : best)).ratePercent as 19 | 7;
+  if ((doc.taxTotalCents ?? 0) > 0) return rateFromTotals(doc.netTotalCents, doc.taxTotalCents) ?? 19;
+  return null;
 }
 
 function hasGermanVat(doc: ProposalDocument): boolean {
@@ -430,18 +454,30 @@ function rateFromTotals(netCents: number | null, taxCents: number | null): 19 | 
  * Apple Ireland, for one, charges German VAT, which only the printed figures show.
  */
 function incomingLines(doc: ProposalDocument, total: number, target: Target, warnings: Set<ProposalWarningCode>): LineInput[] {
-  const pass = passThroughOf(doc, total);
+  let pass = passThroughOf(doc, total);
+  let breakdown = usableBreakdown(doc.taxBreakdown ?? [], total - pass);
+  if (!breakdown) {
+    // A complete breakdown a little short of the total (a notary's two partial invoices, one
+    // pass-through sum extracted): the printed figures are booked, the rest is pass-through.
+    const complete = completeBreakdown(doc.taxBreakdown ?? []);
+    const gap = complete ? total - pass - grossOf(complete) : 0;
+    if (complete && gap !== 0 && Math.sign(gap) === Math.sign(total) && Math.abs(gap) <= Math.abs(total) * MAX_PASS_THROUGH_REMAINDER_SHARE) {
+      pass += gap;
+      breakdown = complete;
+      warnings.add("tax_inconsistent");
+    }
+  }
   const base = total - pass;
   const foreign = isForeignParty(doc.contactCountry, doc.contactVatId);
   const germanVat = hasGermanVat(doc);
+  const vatRate = printedVatRate(doc);
   const text = counterpartyText(doc);
-  if (foreign && germanVat && doc.reverseCharge !== true) warnings.add("foreign_supplier_with_vat");
-  const breakdown = usableBreakdown(doc.taxBreakdown ?? [], base);
-  // A German supplier printing German VAT owes that VAT itself: a reverse-charge note (or an OCR
-  // false positive) loses against the printed figures, flagged.
-  const printedVat = breakdown?.some((entry) => entry.taxCents > 0 && (entry.ratePercent === 19 || entry.ratePercent === 7)) ?? false;
-  const reverseChargeConflict = doc.reverseCharge === true && printedVat && !foreign && isDomesticParty(doc.contactCountry, doc.contactVatId);
+  // A supplier printing a positive German VAT charges that VAT, wherever it sits: a reverse-charge
+  // note (an OCR false positive, a conditional footnote like Finom's) loses against the printed
+  // figures, flagged.
+  const reverseChargeConflict = doc.reverseCharge === true && vatRate !== null;
   if (reverseChargeConflict) warnings.add("reverse_charge_conflict");
+  if (foreign && germanVat && (doc.reverseCharge !== true || reverseChargeConflict)) warnings.add("foreign_supplier_with_vat");
   if (germanVat && pass === 0 && containsAny(text, PASS_THROUGH_KEYWORDS)) warnings.add("possible_pass_through");
 
   const lines: LineInput[] = [];
@@ -472,6 +508,11 @@ function incomingLines(doc: ProposalDocument, total: number, target: Target, war
     const rate = rateFromTotals(doc.netTotalCents, doc.taxTotalCents);
     if (rate && doc.netTotalCents! + doc.taxTotalCents! === base) {
       lines.push({ accountNumber: account, amountCents: doc.netTotalCents!, taxCode: rate === 19 ? "vst19" : "vst7", amountMode: "net", taxCents: doc.taxTotalCents });
+    } else if (!target.fromRule && vatRate !== null && target.taxCode !== "vst19" && target.taxCode !== "vst7") {
+      // The printed figures do not add up, but the document prints a positive tax: an AI answer
+      // of pass_through, not_taxable or the like never replaces it.
+      warnings.add("tax_inconsistent");
+      lines.push({ accountNumber: account, amountCents: base, taxCode: vatRate === 19 ? "vst19" : "vst7", amountMode: "gross" });
     } else if (target.taxCode) {
       if (!target.fromRule && (target.taxCode === "vst19" || target.taxCode === "vst7")) warnings.add("no_tax_breakdown");
       lines.push(...splitOr(target.taxCode));

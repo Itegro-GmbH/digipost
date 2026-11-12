@@ -95,6 +95,7 @@ export const PROPOSAL_WARNING_CODES = [
   "ai_unavailable",
   "reverse_charge_conflict",
   "tax_unverified",
+  "tax_inconsistent",
 ] as const;
 export type ProposalWarningCode = (typeof PROPOSAL_WARNING_CODES)[number];
 

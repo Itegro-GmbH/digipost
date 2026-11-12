@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { CounterpartyPlan } from "@/modules/documents";
 
-import { buildAnalyzerSystemPrompt, buildAnalyzerUserPrompt, buildGuidedDerivedSystemPrompt, buildGuidedOpenSystemPrompt } from "../server/prompts";
+import { buildAnalyzerSystemPrompt, buildAnalyzerUserPrompt, buildGuidedDerivedSystemPrompt, buildGuidedOpenSystemPrompt, buildTaxFieldsSystemPrompt } from "../server/prompts";
 
 describe("buildAnalyzerSystemPrompt", () => {
   it("describes the guarded-section marker pattern for the document text", () => {
@@ -302,6 +302,15 @@ describe("the invoice block's tax fields", () => {
     expect(prompt).toContain("Steuerschuldnerschaft des Leistungsempfängers");
     expect(prompt).toContain("durchlaufender Posten");
   });
+
+  it.each(Object.entries({ ...prompts, taxFields: buildTaxFieldsSystemPrompt() }))(
+    "the %s prompt lists every pass-through sum of several partial invoices and rejects a conditional reverse-charge footnote",
+    (_name, prompt) => {
+      expect(prompt).toContain("JEDE gedruckte Summe durchlaufender Posten als eigener Eintrag");
+      expect(prompt).toContain("mehrere Teilrechnungen");
+      expect(prompt).toContain("Eine bedingte Erläuterung ist KEIN solcher Hinweis");
+    },
+  );
 
   it("keeps the existing invoice fields in the same block", () => {
     for (const prompt of Object.values(prompts)) {

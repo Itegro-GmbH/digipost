@@ -616,12 +616,17 @@ every document processed before, until "Tax field backfill" below reads them:
   `serviceDate`, `servicePeriodFrom`/`servicePeriodTo`) and is told never to compute a missing
   one. `core/tax-fields.ts` parses them (`parseGermanAmountToCents`, `parseTaxRatePercent`; a
   number instead of text is dropped), called from `toInvoiceFields`, so `InvoiceFields` carries
-  them (`ExtractedTaxFields`).
+  them (`ExtractedTaxFields`). `passThroughAmount` is a list of every printed pass-through sum (a
+  notary's document of two partial invoices prints "Summe durchlaufende Posten" twice);
+  `toPassThroughCents` adds them up, so the model never does. A single string is still read.
 - An embedded ZUGFeRD XML wins field by field (`ApplicableTradeTax` per category,
   `TaxBasisTotalAmount`, the invoice-currency `TaxTotalAmount`, category `AE` as reverse charge,
   `ActualDeliverySupplyChainEvent`/`BillingSpecifiedPeriod`). Reverse charge is also set when the
   OCR text carries the note ("Steuerschuldnerschaft des Leistungsempfängers", "Reverse Charge",
-  "§ 13b", article 196), unless the XML says otherwise (`resolveDocumentTaxFields`).
+  "§ 13b", article 196), unless the XML says otherwise (`resolveDocumentTaxFields`). A note in a
+  negated clause ("kein Reverse Charge") or in a conditional sentence ("sollte", "falls", "wenn",
+  "if", "should": Finom's footnote "..., sollte sich der Empfänger außerhalb der Niederlanden
+  befinden") does not count; the prompt tells the model the same.
 - `checkTaxConsistency` compares, within 2 cents, each rate's tax with net times rate, the rates'
   sums with the printed totals, and net plus tax plus pass-through with the total. A mismatch only
   sets `tax_check = 'inconsistent'` (the detail page shows a hint); no figure is changed or filled.

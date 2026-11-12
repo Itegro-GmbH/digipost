@@ -92,6 +92,15 @@ export function toTaxBreakdown(raw: unknown): DocumentTaxBreakdownEntry[] | null
   return entries.length > 0 ? entries : null;
 }
 
+/** The pass-through amount: one printed string, or a list of them (a document of several partial
+ * invoices prints one "Summe durchlaufende Posten" each) summed here, so the model never adds.
+ * An entry that is not a parsable string is dropped; `null` when none is left. */
+export function toPassThroughCents(raw: unknown): number | null {
+  if (!Array.isArray(raw)) return toCents(raw);
+  const amounts = raw.map(toCents).filter((cents): cents is number => cents !== null);
+  return amounts.length > 0 ? amounts.reduce((sum, cents) => sum + cents, 0) : null;
+}
+
 /** `true`/`false` only for an explicit boolean (or its string spelling); anything else is
  * `null`, "the model did not say". */
 export function toReverseChargeAnswer(value: unknown): boolean | null {
@@ -119,10 +128,24 @@ function isNegated(text: string, matchIndex: number): boolean {
   return NEGATION_RE.test(clause);
 }
 
+/** A condition in the same sentence ("..., sollte sich der Empfänger außerhalb der Niederlande
+ * befinden", "if the customer is a business") explains when reverse charge would apply; it is
+ * not a note that it does on this invoice. The sentence ends at `.`, `!`, `?` or a blank line,
+ * looked at no further than this many characters either way. */
+const CONDITION_WINDOW = 160;
+const CONDITION_RE = /\b(?:sollte|sollten|falls|wenn|if|should)\b/i;
+const SENTENCE_BOUNDARY_RE = /[.!?]|\n\s*\n/;
+
+function isConditional(text: string, matchIndex: number, matchLength: number): boolean {
+  const before = text.slice(Math.max(0, matchIndex - CONDITION_WINDOW), matchIndex).split(SENTENCE_BOUNDARY_RE).pop() ?? "";
+  const after = text.slice(matchIndex + matchLength, matchIndex + matchLength + CONDITION_WINDOW).split(SENTENCE_BOUNDARY_RE)[0] ?? "";
+  return CONDITION_RE.test(before) || CONDITION_RE.test(after);
+}
+
 export function detectReverseChargeNote(text: string | null | undefined): boolean {
   if (!text) return false;
   for (const match of text.matchAll(REVERSE_CHARGE_NOTE_RE)) {
-    if (!isNegated(text, match.index)) return true;
+    if (!isNegated(text, match.index) && !isConditional(text, match.index, match[0].length)) return true;
   }
   return false;
 }
@@ -152,7 +175,7 @@ export function toExtractedTaxFields(record: Record<string, unknown>): Extracted
     taxBreakdown: toTaxBreakdown(record.taxBreakdown),
     netTotalCents: toCents(record.netTotalAmount),
     taxTotalCents: toCents(record.taxTotalAmount),
-    passThroughCents: toCents(record.passThroughAmount),
+    passThroughCents: toPassThroughCents(record.passThroughAmount),
     reverseCharge: toReverseChargeAnswer(record.reverseCharge),
     ...toServiceDates(record),
   };
