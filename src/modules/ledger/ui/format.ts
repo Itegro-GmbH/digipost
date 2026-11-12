@@ -7,6 +7,13 @@ export function formatCents(cents: number, currency = "EUR"): string {
   return new Intl.NumberFormat("de", { style: "currency", currency }).format(cents / 100);
 }
 
+/** A DATEV-style balance: the amount without sign plus "S" (Soll, debit) or "H" (Haben,
+ * credit); zero has neither. */
+export function formatSaldo(cents: number): string {
+  if (cents === 0) return formatCents(0);
+  return `${formatCents(Math.abs(cents))} ${cents > 0 ? "S" : "H"}`;
+}
+
 /** A bare ISO date (`YYYY-MM-DD`) as a German date. The `T00:00:00` suffix keeps it a local
  * date: a bare ISO date would be parsed as UTC midnight and could show the day before. */
 export function formatIsoDate(isoDate: string): string {
