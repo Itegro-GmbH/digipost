@@ -93,6 +93,9 @@ overwrites a booked, dismissed or human-edited entry.
   origin, reason, warnings and source key out), `invoiceVatGroups` (an issued invoice's net and
   VAT per category, reconciled to its stored totals), the rule pickers.
 - `core/ports.ts`: `LedgerBookingAdvisor`, the AI port, with its question and answer shapes.
+- `core/tax-evidence.ts`: `hasPrintedTaxFigures` and `isUnverifiedReverseCharge`, whether a
+  document's figures back reverse charge (pure, no Node imports: the client editor imports
+  `core/proposals.ts`).
 - `core/booking-advisor.ts`: `validateBookingAdvice` (account from the question's chart, tax code
   fitting the direction, a split that adds up), `bookingAdviceCacheKey`, `toCacheableBookingAdvice`,
   and `createFakeLedgerBookingAdvisor` (keyword based, deterministic).
@@ -357,7 +360,11 @@ Templates, from certain to uncertain:
   name pattern), else the AI, else 6300 with `ai_unavailable`. Tax: one base line per printed
   rate with the exact printed net and tax (`vst19` on 1406, `vst7` on 1401); `rc13b` (net = gross,
   1407/3837 pair) when the document says reverse charge or the supplier is foreign (contact
-  country not DE, or a non-DE VAT id) and shows no German VAT; the pass-through amount on its own
+  country not DE, or a non-DE VAT id) and shows no German VAT. Reverse charge is never a silent
+  guess: when the document prints no tax figure at all (no breakdown entry with an amount, no tax
+  total) and has no reverse-charge note, a foreign supplier's `rc13b` (and any `rc13b` the AI
+  answers then) carries `tax_unverified`, unless a rule with a tax code decides (the rule's code
+  is booked, no warning); `core/tax-evidence.ts` holds the test. The pass-through amount on its own
   `pass_through` line; with nothing printed the rule's or the AI's code, `not_taxable` for courts
   and authorities, else `vst19` from the gross with `no_tax_breakdown`. A German supplier (contact
   country DE or a DE VAT id) printing German VAT is booked from the printed breakdown even when
@@ -401,13 +408,21 @@ Warnings: `no_tax_breakdown`, `amount_differs_from_payment`, `possible_pass_thro
 court or register costs with German VAT and no pass-through amount), `foreign_supplier_with_vat`
 (Finom NL, Apple IE with German VAT), `duplicate_suspect` (same contact, invoice number and
 amount as an earlier document), `ai_unavailable`, `reverse_charge_conflict` (a German supplier's
-printed German VAT next to a reverse-charge note). Problems (no proposal, named after
+printed German VAT next to a reverse-charge note), `tax_unverified` (reverse charge without a
+printed tax figure or a reverse-charge note: Apple Ireland charges German VAT, which only its
+printed figures show; "Steuer nicht erkannt"). Any warning keeps a proposal out of "Sicher", so a
+template proposal with `tax_unverified` is under "Bitte ansehen" too. Problems (no proposal, named after
 "Vorschläge aktualisieren"): `unsupported_platform_settlement`.
 
 **The AI advisor** (`LedgerBookingAdvisor`) is asked for an account from the workspace's own
 expense accounts, a tax code and one German sentence, optionally a split (a court fee and a
 dunning fee). It is told only the extracted fields, never the OCR text (AGENTS.md "Mistral and
-personal data"). Every answer, of any kind, is kept per document in `ledger_booking_advice` under
+personal data"). The prompt names the typical accounts (bank and payment-service fees such as
+Finom on 6855, authority fees such as a Gewerbeanmeldung and court costs on 6300 `not_taxable`,
+a notary on 6825 with its court and register fees as pass-through) and asks for `taxCode: null`
+instead of a guess when no tax figure and no reverse-charge note is known.
+`validateBookingAdvice` keeps an `rc13b` answer the question's figures do not back, marked
+`taxUnverified`, which the engine turns into the `tax_unverified` warning. Every answer, of any kind, is kept per document in `ledger_booking_advice` under
 a hash of the whole question and the advisor's version; the same question is never asked twice,
 a changed document, chart or prompt is. A sync asks at most 40 questions; the rest wait for the
 next run, which the job schedules right away. A failing call is not cached.

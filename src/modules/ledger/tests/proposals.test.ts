@@ -230,7 +230,7 @@ describe("buildProposals: incoming invoices", () => {
   });
 
   it("Meta prepaid credit: the top-up goes to 1461, every reverse-charge invoice consumes it, the rest stays open", async () => {
-    const meta = { contactId: META, contactName: "Meta Platforms Ireland Ltd.", contactCountry: "IE", contactVatId: "IE9692928F" };
+    const meta = { contactId: META, contactName: "Meta Platforms Ireland Ltd.", contactCountry: "IE", contactVatId: "IE9692928F", reverseCharge: true };
     const snap = snapshot({
       documents: [doc("meta-1", { ...meta, totalAmountCents: 2 }), doc("meta-2", { ...meta, totalAmountCents: 1300 }), doc("meta-3", { ...meta, totalAmountCents: 8654 })],
       transactions: [tx("tx-topup", -10_000, { counterpartyName: "FACEBK *QX7MNP41KD", resolvedContactId: META })],
@@ -256,7 +256,7 @@ describe("buildProposals: incoming invoices", () => {
   });
 
   it("Google Ads: charged 10 + 50 + 36,57 before one invoice of 96,57; the account reaches zero only as a suggested group", async () => {
-    const gads = { contactId: GOOGLE_ADS, contactName: "Google Ireland Limited", contactCountry: "IE", contactVatId: "IE6388047V", title: "Google Ads Rechnung" };
+    const gads = { contactId: GOOGLE_ADS, contactName: "Google Ireland Limited", contactCountry: "IE", contactVatId: "IE6388047V", title: "Google Ads Rechnung", reverseCharge: true };
     const charge = (id: string, cents: number, date: string) => tx(id, -cents, { bookingDate: date, counterpartyName: "GOOGLE *ADS1234", resolvedContactId: GOOGLE_ADS });
     const snap = snapshot({
       documents: [doc("gads", { ...gads, documentDate: "2026-08-31", effectiveDate: "2026-08-31", totalAmountCents: 9657 })],
@@ -423,6 +423,79 @@ describe("buildProposals: incoming invoices", () => {
       ["1800", -980, null, null],
       ["3300", 980, null, "part"],
     ]);
+  });
+});
+
+describe("buildProposals: no reverse charge guessed without tax figures", () => {
+  const appleDeveloper = { contactId: APPLE_IE, contactName: "Apple Distribution International Ltd.", contactCountry: "IE", contactVatId: "IE9700053D", title: "Apple Developer Program", totalAmountCents: 9900 };
+
+  it("Apple Developer invoice from Ireland without a breakdown: kept, but flagged tax_unverified", async () => {
+    const result = await plan(snapshot({ documents: [doc("apple-dev", appleDeveloper)] }));
+    const draft = draftFor(result, "doc:apple-dev");
+    expect(draft.origin).toBe("ai");
+    expect(draft.warnings).toContain("tax_unverified");
+    expect(draft.entry.lines[0]!.taxCode).toBe("rc13b");
+  });
+
+  it("the same invoice with its printed breakdown 83,19 + 15,81: vst19, flagged as a foreign supplier with VAT", async () => {
+    const result = await plan(snapshot({ documents: [doc("apple-dev", { ...appleDeveloper, taxBreakdown: [{ ratePercent: 19, netCents: 8319, taxCents: 1581 }] })] }));
+    const draft = draftFor(result, "doc:apple-dev");
+    expect(draft.warnings).toEqual(["foreign_supplier_with_vat"]);
+    expect(booked(draft).slice(0, 2)).toEqual([
+      ["6837", 8319, "vst19", null],
+      ["1406", 1581, "vst19", null],
+    ]);
+  });
+
+  it("Finom with its printed breakdown 107,88 + 20,50: vst19 on 6855, flagged as a foreign supplier with VAT", async () => {
+    const result = await plan(
+      snapshot({
+        documents: [doc("finom", { contactId: FINOM, contactName: "Finom B.V.", contactCountry: "NL", contactVatId: "NL862287339B01", title: "Kontoführung", totalAmountCents: 12_838, taxBreakdown: [{ ratePercent: 19, netCents: 10_788, taxCents: 2050 }] })],
+      }),
+    );
+    const draft = draftFor(result, "doc:finom");
+    expect(draft.warnings).toEqual(["foreign_supplier_with_vat"]);
+    expect(booked(draft).slice(0, 2)).toEqual([
+      ["6855", 10_788, "vst19", null],
+      ["1406", 2050, "vst19", null],
+    ]);
+  });
+
+  it("Meta with the reverse-charge note: rc13b without a warning", async () => {
+    const result = await plan(
+      snapshot({ documents: [doc("meta", { contactId: META, contactName: "Meta Platforms Ireland Ltd.", contactCountry: "IE", contactVatId: "IE9692928F", reverseCharge: true, totalAmountCents: 6000 })] }),
+    );
+    const draft = draftFor(result, "doc:meta");
+    expect(draft.warnings).toEqual([]);
+    expect(draft.entry.lines[0]!.taxCode).toBe("rc13b");
+  });
+
+  it("a rule's tax code wins and needs no warning", async () => {
+    const snap = snapshot({
+      rules: [{ id: "rule-apple", contactId: APPLE_IE, counterpartyPattern: null, direction: "incoming", accountNumber: "6837", taxCode: "vst19", paymentAccountNumber: null, noDocument: false }],
+      documents: [doc("apple-dev", appleDeveloper)],
+    });
+    const draft = draftFor(buildProposals(snap, new Map()), "doc:apple-dev");
+    expect(draft).toMatchObject({ origin: "rule", warnings: [] });
+    expect(booked(draft).slice(0, 2)).toEqual([
+      ["6837", 8319, "vst19", null],
+      ["1406", 1581, "vst19", null],
+    ]);
+  });
+
+  it("the template default (AI unavailable) is flagged too, so it never counts as safe", async () => {
+    const draft = draftFor(buildProposals(snapshot({ documents: [doc("apple-dev", appleDeveloper)] }), new Map([["apple-dev", null]])), "doc:apple-dev");
+    expect(draft.origin).toBe("template");
+    expect(draft.warnings).toEqual(["ai_unavailable", "tax_unverified"]);
+  });
+
+  it("an AI answer of rc13b for a supplier of unknown country without tax figures is flagged", async () => {
+    const unknown = doc("unknown", { contactName: "Some Vendor Ltd", contactCountry: null, totalAmountCents: 5000 });
+    const advice = validateBookingAdvice({ accountNumber: "6837", taxCode: "rc13b", reason: "Ausländische Software." }, adviceQuestionsFor(snapshot({ documents: [unknown] }))[0]!);
+    expect(advice).toMatchObject({ taxCode: "rc13b", taxUnverified: true });
+    const draft = draftFor(buildProposals(snapshot({ documents: [unknown] }), new Map([["unknown", advice]])), "doc:unknown");
+    expect(draft.warnings).toEqual(["tax_unverified"]);
+    expect(draft.entry.lines[0]!.taxCode).toBe("rc13b");
   });
 });
 

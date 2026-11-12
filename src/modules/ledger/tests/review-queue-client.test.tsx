@@ -103,6 +103,14 @@ describe("ReviewQueueClient", () => {
     expect(within(problems).getByRole("link", { name: "Buchung anlegen" }).getAttribute("href")).toBe("/dashboard/buchhaltung/buchung/neu?umsatz=tx-1");
   });
 
+  it("puts a template proposal flagged tax_unverified under \"Bitte ansehen\", with its label", () => {
+    renderQueue({ entries: [entry("ionos"), entry("apple", { warnings: ["tax_unverified"], totalCents: 9900 })] });
+    const review = section(/Bitte ansehen/);
+    expect(within(review).getByText("Eintrag apple")).toBeTruthy();
+    expect(within(review).getByText("Steuer nicht erkannt")).toBeTruthy();
+    expect(within(section(/Sicher/)).queryByText("Eintrag apple")).toBeNull();
+  });
+
   it("selects only the safe proposals and books them in bulk with their sum", async () => {
     renderQueue();
     fireEvent.click(screen.getByRole("button", { name: "Alle sicheren auswählen (2)" }));

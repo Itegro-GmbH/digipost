@@ -31,6 +31,30 @@ function question(overrides: Partial<BookingAdviceQuestion> = {}): BookingAdvice
   };
 }
 
+describe("validateBookingAdvice: reverse charge without tax figures", () => {
+  const noFigures = { country: "IE", vatId: "IE9700053D", netTotalCents: null, taxTotalCents: null, reverseCharge: null, taxBreakdown: null };
+
+  it("keeps an rc13b answer but marks it unverified when the question has no tax figures and no reverse-charge note", () => {
+    expect(validateBookingAdvice({ accountNumber: "6810", taxCode: "rc13b", reason: "Ausländischer Anbieter." }, question(noFigures))).toMatchObject({ taxCode: "rc13b", taxUnverified: true });
+  });
+
+  it("marks a split naming rc13b the same way", () => {
+    const advice = validateBookingAdvice(
+      { accountNumber: "6810", taxCode: null, reason: "Zwei Kostenarten.", lines: [{ accountNumber: "6810", taxCode: "rc13b", amountCents: 100 }, { accountNumber: "6300", taxCode: "not_taxable", amountCents: 50 }] },
+      question(noFigures),
+    );
+    expect(advice).toMatchObject({ taxUnverified: true });
+  });
+
+  it("does not mark it when the document notes reverse charge or prints tax figures", () => {
+    expect(validateBookingAdvice({ accountNumber: "6810", taxCode: "rc13b", reason: "Reverse Charge." }, question({ ...noFigures, reverseCharge: true }))!.taxUnverified).toBeUndefined();
+    expect(
+      validateBookingAdvice({ accountNumber: "6810", taxCode: "rc13b", reason: "Ohne USt." }, question({ ...noFigures, taxBreakdown: [{ ratePercent: 0, netCents: 150, taxCents: 0 }] }))!.taxUnverified,
+    ).toBeUndefined();
+    expect(validateBookingAdvice({ accountNumber: "6810", taxCode: "vst19", reason: "Deutsche USt." }, question(noFigures))!.taxUnverified).toBeUndefined();
+  });
+});
+
 describe("validateBookingAdvice", () => {
   it("accepts an account from the chart with a fitting tax code and keeps only the first sentence", () => {
     expect(validateBookingAdvice({ accountNumber: "6810", taxCode: "vst19", reason: "Hosting ist Internet. Zweiter Satz." }, question())).toEqual({
