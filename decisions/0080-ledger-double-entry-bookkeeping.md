@@ -381,3 +381,11 @@ decision above; each is a correction within it.
   (`src/modules/ledger/README.md`, "Proposal engine"; `src/modules/documents/README.md`, "Tax
   fields").
 
+- **MCP tools.** The ledger shipped without MCP tools, although decisions/0078-mcp-server.md asks
+  every new dashboard capability to decide whether it becomes one. It now has 34 of them
+  (`src/modules/mcp/README.md`, "Tools"): every read with `finance.read`, every write through the
+  ledger's own Server Actions with `finance.manage`, all answering `disabled` while the ledger is
+  off. Marking a filing as submitted, the one step that locks a period for good, is offered too
+  (user decision 2026-11-13) as a `destructive` tool whose description says it cannot be undone
+  and asks for the user's explicit confirmation; `create_filing` only creates drafts. Enabling
+  the ledger and its general settings stay dashboard-only.

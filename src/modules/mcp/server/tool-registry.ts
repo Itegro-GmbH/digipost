@@ -10,9 +10,10 @@ import { workspaceIdArgument, type McpTool, type ToolInputSchema } from "../core
 import { CONTACT_TOOLS } from "./tools/contact-tools";
 import { DOCUMENT_TOOLS } from "./tools/document-tools";
 import { FINANCE_TOOLS } from "./tools/finance-tools";
+import { LEDGER_TOOLS } from "./tools/ledger-tools";
 import { WORKSPACE_TOOLS } from "./tools/workspace-tools";
 
-export const MCP_TOOLS: readonly McpTool[] = [...WORKSPACE_TOOLS, ...DOCUMENT_TOOLS, ...CONTACT_TOOLS, ...FINANCE_TOOLS];
+export const MCP_TOOLS: readonly McpTool[] = [...WORKSPACE_TOOLS, ...DOCUMENT_TOOLS, ...CONTACT_TOOLS, ...FINANCE_TOOLS, ...LEDGER_TOOLS];
 
 const names = new Set<string>();
 for (const tool of MCP_TOOLS) {

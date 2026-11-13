@@ -14,7 +14,8 @@ Maintenance triggers:
 - A tax code, its USt-VA mapping, or the seed chart changes
 - A new write path touches a ledger table, or a control is added
 - The proposal engine or the UI stage lands (decisions/0080 phases)
-Last verified: 2026-11-12, notes after production use (decisions/0080): the settlement template
+Last verified: 2026-11-13, decisions/0080 "MCP tools": the projections and actions are offered
+as MCP tools. Previously 2026-11-12, notes after production use (decisions/0080): the settlement template
 nets Google's refunded fees, `tax_unverified` (no reverse charge guessed without printed tax
 figures, `core/tax-evidence.ts`), the advisor prompt's typical accounts, and `TaxBackfillCard`.
 Previously 2026-11-12, fixes from the acceptance replay and the review: bank-transaction rules
@@ -166,6 +167,8 @@ overwrites a booked, dismissed or human-edited entry.
   `uploadAdvisorBalancesAction`, `deleteAdvisorUploadAction`, `syncLedgerProposalsAction`
   ("Vorschläge aktualisieren", optionally for a period), `learnLedgerRuleFromEntryAction`
   ("Als Regel speichern").
+- The MCP server (`src/modules/mcp/server/tools/ledger-tools.ts`) offers these projections and
+  actions as tools, except the settings and the chart sync (`src/modules/mcp/README.md`, "Tools").
 - Use cases without an action: `scheduleSync` (the `ledger-sync` job), `autoMatchOpenItems`
   (after every sync and every booking).
 - `client.ts`: `AccountTag`, `EntryEditor` (with `EditorEntry`, `EditorSeed`), `EntryLinesTable`,

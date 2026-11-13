@@ -14,7 +14,9 @@ Maintenance triggers:
 - A permission bundle in `src/platform/access` changes
 - The MCP SDK (`@modelcontextprotocol/server`) or the protocol revision it serves changes
 - A user decision behind the exclusions below changes (decisions/0078-mcp-server.md)
-Last verified: 2026-11-03, decisions/0078-mcp-server.md: this module landed, 44 tools, against
+Last verified: 2026-11-13, decisions/0080-ledger-double-entry-bookkeeping.md: added the 34 ledger tools
+(78 in total) against `src/modules/ledger/actions.ts` and `server.ts`. Previously 2026-11-03,
+decisions/0078-mcp-server.md: this module landed, 44 tools, against
 `src/modules/*/actions.ts`, the `(app)` pages and `src/platform/access/core/permissions.ts`
 
 ## Purpose
@@ -92,6 +94,17 @@ cents. `tests/tool-permissions.test.ts` holds the authoritative permission table
 | `create_account`, `update_account`, `create_contact_clearing_account`, `import_statement`, `confirm_payment_suggestion`, `reject_payment_suggestion`, `link_payment`, `mark_transactions_no_document_needed`, `set_payment_auto_confirm_mode` | `finance.manage` | write |
 | `unlink_payment`, `delete_payment_alias` | `finance.manage` | destructive |
 | `mark_document_settled_without_payment` | `documents.write` | write |
+| `get_ledger_overview`, `list_journal_entries`, `get_journal_entry`, `list_ledger_accounts`, `get_ledger_balances`, `get_ledger_account_sheet`, `get_ledger_open_items`, `get_vat_preview`, `list_booking_rules`, `list_ledger_periods`, `get_advisor_comparison` | `finance.read` | read |
+| `create_journal_entry`, `update_journal_entry`, `book_journal_entries`, `unbook_journal_entry`, `dismiss_proposal`, `restore_proposal`, `sync_ledger_proposals`, `create_ledger_account`, `update_ledger_account`, `set_ledger_account_archived`, `create_open_item_match`, `create_booking_rule`, `update_booking_rule`, `learn_booking_rule_from_entry`, `create_filing`, `create_correction_filing`, `create_handover`, `import_advisor_balances` | `finance.manage` | write |
+| `delete_journal_entry`, `delete_open_item_match`, `delete_booking_rule`, `delete_advisor_balances`, `submit_filing` | `finance.manage` | destructive |
+
+The ledger tools (`server/tools/ledger-tools.ts`, decisions/0080-ledger-double-entry-bookkeeping.md)
+work only while the ledger is enabled for the workspace: a read answers `disabled` (the ledger's
+own code, the same the actions return) instead of running. `create_filing` only creates drafts;
+`submit_filing` ("Als eingereicht markieren") is the one step that locks a period for good, so it
+is `destructive`, says so, and tells the model to call it only after the user confirmed the
+return was filed (user decision 2026-11-13: offered over MCP too, not dashboard-only). The ledger
+settings (enabling it, VAT period, start date) stay dashboard-only.
 
 Finance redaction follows the dashboard exactly: `get_document` asks
 `getDocumentPaymentSectionProjection` with the caller's own `finance.read`, so a member sees the
