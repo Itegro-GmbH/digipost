@@ -1,12 +1,15 @@
 // decisions/0078-mcp-server.md: the pieces of the OAuth authorization flow our own pages
 // take part in - `/oauth/login` (Better Auth's `loginPage`), `/oauth/consent` (its
-// `consentPage`) and the OIDC discovery document at the path-insertion URL.
+// `consentPage`), the OIDC discovery document at the path-insertion URL and the protected
+// resource metadata.
 import "server-only";
 
 import { oauthProviderOpenIdConfigMetadata, verifyOAuthQueryParams } from "@better-auth/oauth-provider";
 import { headers } from "next/headers";
 
 import { getAuth } from "./auth";
+import { OFFLINE_ACCESS_SCOPE } from "./oauth-config";
+import { authRouteHandlers } from "./route-handlers";
 
 /** Signature-only parameters Better Auth adds to the authorize query it hands to our pages. */
 const SIGNED_QUERY_ONLY_PARAMS = ["sig", "exp", "ba_iat", "ba_param", "ba_pl"] as const;
@@ -57,4 +60,20 @@ export async function getOAuthClientDisplay(clientId: string): Promise<OAuthClie
  */
 export function openIdConfigurationResponse(request: Request): Promise<Response> {
   return oauthProviderOpenIdConfigMetadata(getAuth())(request);
+}
+
+/**
+ * The MCP server's protected resource metadata (RFC 9728), served by Better Auth's `mcp()`
+ * plugin, with `offline_access` added to `scopes_supported` (decisions/0078-mcp-server.md,
+ * "Refresh tokens"). The plugin lists only resource scopes there, and an MCP client that picks
+ * its scopes from this document then never asks for a refresh token and loses the connection
+ * when the 15-minute access token runs out. Any other answer passes through unchanged.
+ */
+export async function protectedResourceMetadataResponse(request: Request): Promise<Response> {
+  const response = await authRouteHandlers.GET(request);
+  if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) return response;
+  const metadata = (await response.json()) as { scopes_supported?: string[] };
+  const scopes = metadata.scopes_supported ?? [];
+  if (scopes.length === 0 || scopes.includes(OFFLINE_ACCESS_SCOPE)) return Response.json(metadata, { headers: response.headers });
+  return Response.json({ ...metadata, scopes_supported: [...scopes, OFFLINE_ACCESS_SCOPE] }, { headers: response.headers });
 }

@@ -13,7 +13,9 @@ Maintenance triggers:
 - A new rate-limited Better Auth endpoint needs a Server Action caller
   (decisions/0005: it MUST go through `getAuth().handler(request)`, never `auth.api.*`)
 - The IP header trust order (`ipAddressHeaders`) or the hosting/proxy setup changes
-Last verified: 2026-11-03, decisions/0078-mcp-server.md: the OAuth 2.1 authorization server of
+Last verified: 2026-11-13, decisions/0078-mcp-server.md "Refresh tokens": `offline_access` added to
+the resource metadata and to authorize requests for `digipost` alone. Previously 2026-11-03,
+decisions/0078-mcp-server.md: the OAuth 2.1 authorization server of
 the MCP server (`jwt()`, `mcp()`, `cimd()`, see "OAuth authorization server for the MCP server"
 below) and the files `server/oauth-config.ts`, `server/mcp-bearer.ts`, `server/oauth-flow.ts`,
 `server/oauth-grants.ts`. Previously 2026-10-21, decisions/0074-sign-up-by-invitation-only.md: new accounts only for
@@ -146,6 +148,10 @@ server for `/api/mcp`:
   unauthenticated, rate limited to 20 per hour per IP), revoke, userinfo; the protected resource
   metadata (RFC 9728) and authorization server metadata (RFC 8414). Access tokens are 15-minute
   JWTs with `aud` = `<APP_URL>/api/mcp`; refresh tokens rotate (30-second replay window).
+- Refresh tokens: `offline_access` is added to the protected resource metadata
+  (`protectedResourceMetadataResponse`) and, by a `hooks.before` on `/oauth2/authorize`, to a PKCE
+  request for `digipost` without it (`withMcpOfflineAccess`, registered clients that may hold it
+  only), so no MCP client is left without a refresh token (decisions/0078, "Refresh tokens").
 - `cimd()`: Client ID Metadata Documents (a URL as `client_id`), fetched through
   `@better-auth/cimd/node`'s transport, which pins public DNS answers and never follows redirects
   (no SSRF into the internal network).

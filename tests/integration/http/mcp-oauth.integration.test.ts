@@ -112,13 +112,13 @@ function pkce() {
   return { verifier, challenge: createHash("sha256").update(verifier).digest("base64url") };
 }
 
-function authorizeUrl(clientId: string, challenge: string, redirectUri = REDIRECT_URI): string {
+function authorizeUrl(clientId: string, challenge: string, redirectUri = REDIRECT_URI, scope = "openid offline_access digipost"): string {
   const url = new URL(`${ISSUER}/oauth2/authorize`);
   for (const [key, value] of Object.entries({
     response_type: "code",
     client_id: clientId,
     redirect_uri: redirectUri,
-    scope: "openid offline_access digipost",
+    scope,
     state: randomBytes(8).toString("hex"),
     code_challenge: challenge,
     code_challenge_method: "S256",
@@ -173,9 +173,9 @@ async function registerClient(name: string): Promise<string> {
 
 /** authorize (signed in) -> consent -> code -> tokens, like an MCP client plus its user. A user
  * who already consented to this client is sent straight back with a code (no consent page). */
-async function connect(person: TestUser, clientId: string): Promise<{ accessToken: string; refreshToken: string }> {
+async function connect(person: TestUser, clientId: string, scope?: string): Promise<{ accessToken: string; refreshToken: string }> {
   const { verifier, challenge } = pkce();
-  const authorizeLocation = new URL(await redirectTarget(await authGet(authorizeUrl(clientId, challenge), person.cookie)), APP);
+  const authorizeLocation = new URL(await redirectTarget(await authGet(authorizeUrl(clientId, challenge, REDIRECT_URI, scope), person.cookie)), APP);
 
   let callback = authorizeLocation;
   if (authorizeLocation.pathname === "/oauth/consent") {
@@ -272,6 +272,8 @@ describe("MCP OAuth discovery", () => {
     expect(body.resource).toBe(MCP_URL);
     expect(body.authorization_servers).toEqual([ISSUER]);
     expect(body.scopes_supported).toContain("digipost");
+    // decisions/0078 "Refresh tokens": a client picking its scopes from here asks for one.
+    expect(body.scopes_supported).toContain("offline_access");
   });
 
   it("serves authorization server metadata (path insertion) with PKCE, DCR and CIMD", async () => {
@@ -342,6 +344,17 @@ describe("MCP OAuth authorization", () => {
     const refreshed = await tokenRequest({ grant_type: "refresh_token", refresh_token: refreshToken, client_id: dcrClientId, resource: MCP_URL });
     expect(refreshed.status).toBe(200);
     expect(refreshed.body.refresh_token).not.toBe(refreshToken);
+    const call = await callTool(refreshed.body.access_token!, "list_workspaces");
+    expect(call.response.status).toBe(200);
+  });
+
+  it("issues a refresh token to a client that asks for digipost alone (decisions/0078, Refresh tokens)", async () => {
+    const clientId = await registerClient("Scope From Resource Metadata");
+    const { refreshToken } = await connect(admin, clientId, "digipost");
+    expect(refreshToken).toBeTruthy();
+
+    const refreshed = await tokenRequest({ grant_type: "refresh_token", refresh_token: refreshToken, client_id: clientId, resource: MCP_URL });
+    expect(refreshed.status).toBe(200);
     const call = await callTool(refreshed.body.access_token!, "list_workspaces");
     expect(call.response.status).toBe(200);
   });

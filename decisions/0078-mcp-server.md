@@ -81,6 +81,17 @@ exists for (user, client) - JWTs cannot be recalled, so this per-request check i
 revocation immediate - and a rate limit. The unauthenticated challenge advertises
 `digipost offline_access`, so spec-following clients ask for a refresh token.
 
+**Refresh tokens** (added 2026-11-13, after production use). The challenge alone was not enough:
+a client that takes its scopes from the protected resource metadata asked for `digipost` only,
+because Better Auth's `mcp()` lists no `offline_access` there, got no refresh token, and lost its
+connection every 15 minutes (production had not issued a single refresh token). Two fixes, each
+enough on its own for most clients: the metadata route adds `offline_access` to
+`scopes_supported`, and a Better Auth `before` hook on `/oauth2/authorize` adds `offline_access`
+to a request that asks for `digipost` without it (`withMcpOfflineAccess`), only with PKCE and only
+for a registered, enabled client that may hold the scope and use the authorization code grant.
+The consent page then names the refresh scope like any other. A client connected before the fix
+has to connect again once.
+
 **Revocation is complete and immediate.** "Verbindung trennen" (`revokeOAuthGrant`) deletes, in
 one transaction, the consent, every refresh token, every stored access token and the usage row
 of that client for that user. Better Auth's own `delete-consent` would leave a working refresh

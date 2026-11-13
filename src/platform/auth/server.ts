@@ -15,6 +15,7 @@ export {
   getOAuthClientDisplay,
   oauthAuthorizeResumePath,
   openIdConfigurationResponse,
+  protectedResourceMetadataResponse,
   verifyOAuthQuery,
   type OAuthClientDisplay,
 } from "./server/oauth-flow";
