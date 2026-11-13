@@ -51,6 +51,14 @@ vi.mock("@/modules/mail-intake/server", async (importOriginal) => ({
   getEmailSourceForDocumentProjection: async () => null,
 }));
 
+const isLedgerEnabledProjection = vi.fn(async () => true);
+const getLedgerVatPreviewProjection = vi.fn(async () => ({ fields: [] }));
+vi.mock("@/modules/ledger/server", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  isLedgerEnabledProjection: (...args: unknown[]) => isLedgerEnabledProjection(...(args as [])),
+  getLedgerVatPreviewProjection: (...args: unknown[]) => getLedgerVatPreviewProjection(...(args as [])),
+}));
+
 import { PERMISSIONS } from "@/platform/access";
 
 import { executeTool } from "../server/execute-tool";
@@ -76,6 +84,8 @@ beforeEach(() => {
   getDocumentDetailProjection.mockReset();
   getDocumentPaymentSectionProjection.mockReset();
   getSettlementReportProjection.mockReset();
+  isLedgerEnabledProjection.mockClear();
+  getLedgerVatPreviewProjection.mockClear();
 });
 
 /** The dashboard's own permission for every capability the MCP server exposes. A new tool must
@@ -125,6 +135,40 @@ const EXPECTED_PERMISSIONS: Record<string, string | null> = {
   set_payment_auto_confirm_mode: PERMISSIONS.financeManage,
   delete_payment_alias: PERMISSIONS.financeManage,
   get_closing_report: PERMISSIONS.financeRead,
+  get_ledger_overview: PERMISSIONS.financeRead,
+  list_journal_entries: PERMISSIONS.financeRead,
+  get_journal_entry: PERMISSIONS.financeRead,
+  list_ledger_accounts: PERMISSIONS.financeRead,
+  get_ledger_balances: PERMISSIONS.financeRead,
+  get_ledger_account_sheet: PERMISSIONS.financeRead,
+  get_ledger_open_items: PERMISSIONS.financeRead,
+  get_vat_preview: PERMISSIONS.financeRead,
+  list_booking_rules: PERMISSIONS.financeRead,
+  list_ledger_periods: PERMISSIONS.financeRead,
+  get_advisor_comparison: PERMISSIONS.financeRead,
+  create_journal_entry: PERMISSIONS.financeManage,
+  update_journal_entry: PERMISSIONS.financeManage,
+  book_journal_entries: PERMISSIONS.financeManage,
+  unbook_journal_entry: PERMISSIONS.financeManage,
+  delete_journal_entry: PERMISSIONS.financeManage,
+  dismiss_proposal: PERMISSIONS.financeManage,
+  restore_proposal: PERMISSIONS.financeManage,
+  sync_ledger_proposals: PERMISSIONS.financeManage,
+  create_ledger_account: PERMISSIONS.financeManage,
+  update_ledger_account: PERMISSIONS.financeManage,
+  set_ledger_account_archived: PERMISSIONS.financeManage,
+  create_open_item_match: PERMISSIONS.financeManage,
+  delete_open_item_match: PERMISSIONS.financeManage,
+  create_booking_rule: PERMISSIONS.financeManage,
+  update_booking_rule: PERMISSIONS.financeManage,
+  learn_booking_rule_from_entry: PERMISSIONS.financeManage,
+  delete_booking_rule: PERMISSIONS.financeManage,
+  create_filing: PERMISSIONS.financeManage,
+  submit_filing: PERMISSIONS.financeManage,
+  create_correction_filing: PERMISSIONS.financeManage,
+  create_handover: PERMISSIONS.financeManage,
+  import_advisor_balances: PERMISSIONS.financeManage,
+  delete_advisor_balances: PERMISSIONS.financeManage,
 };
 
 describe("the MCP tool registry", () => {
@@ -273,5 +317,49 @@ describe("get_document finance redaction", () => {
     expect(without).toMatchObject({ ok: true, data: { document: { ocrTextLength: 14 } } });
     expect(JSON.stringify(without)).not.toContain("Rechnung");
     expect(withText).toMatchObject({ ok: true, data: { document: { ocrText: "Nr.", ocrTextOffset: 9, ocrTextTruncated: true } } });
+  });
+});
+
+describe("ledger tools", () => {
+  const VAT_INPUT = { from: "2026-07-01", to: "2026-09-30" };
+
+  it("refuses a ledger read to a member without running it", async () => {
+    listMembershipsForUser.mockResolvedValue([MEMBER_WS]);
+
+    const outcome = await executeTool(tool("get_vat_preview"), VAT_INPUT, CALLER);
+
+    expect(outcome).toEqual({ ok: false, errorCode: "forbidden", details: { requiredPermission: PERMISSIONS.financeRead } });
+    expect(isLedgerEnabledProjection).not.toHaveBeenCalled();
+  });
+
+  it("answers disabled while the workspace has not enabled the ledger", async () => {
+    listMembershipsForUser.mockResolvedValue([ADMIN_WS]);
+    isLedgerEnabledProjection.mockResolvedValueOnce(false);
+
+    const outcome = await executeTool(tool("get_vat_preview"), VAT_INPUT, CALLER);
+
+    expect(outcome).toEqual({ ok: false, errorCode: "disabled" });
+    expect(getLedgerVatPreviewProjection).not.toHaveBeenCalled();
+  });
+
+  it("reads the resolved workspace's ledger for an admin", async () => {
+    listMembershipsForUser.mockResolvedValue([ADMIN_WS]);
+
+    const outcome = await executeTool(tool("get_vat_preview"), VAT_INPUT, CALLER);
+
+    expect(outcome).toMatchObject({ ok: true, data: { preview: { fields: [] } } });
+    expect(getLedgerVatPreviewProjection).toHaveBeenCalledWith(ADMIN_WS.workspace.id, VAT_INPUT.from, VAT_INPUT.to);
+  });
+
+  it("offers submitting a filing only as a destructive tool that says it locks the period for good", () => {
+    const submit = tool("submit_filing");
+
+    expect(submit.effect).toBe("destructive");
+    expect(submit.description).toMatch(/LOCKED/);
+    expect(submit.description).toMatch(/CANNOT be undone/);
+  });
+
+  it("creates filings only as drafts", () => {
+    expect(Object.keys(tool("create_filing").input.shape)).not.toContain("status");
   });
 });
