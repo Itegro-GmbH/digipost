@@ -22,7 +22,7 @@ import "server-only";
 
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { APIError } from "better-auth/api";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
 import { jwt, magicLink } from "better-auth/plugins";
 import { cimd } from "@better-auth/cimd";
@@ -34,7 +34,15 @@ import { createSmtpMailer } from "@/platform/mailer/server";
 import { serverEnv } from "@/platform/env/server";
 
 import { MAGIC_LINK_EMAIL_SUBJECT, renderMagicLinkEmail } from "./emails/magic-link-email";
-import { MCP_ACCESS_TOKEN_EXPIRES_IN_SECONDS, MCP_OAUTH_SCOPES, mcpResourceUrl, OAUTH_CONSENT_PAGE, OAUTH_LOGIN_PAGE } from "./oauth-config";
+import {
+  MCP_ACCESS_TOKEN_EXPIRES_IN_SECONDS,
+  MCP_OAUTH_SCOPES,
+  mcpResourceUrl,
+  OAUTH_CONSENT_PAGE,
+  OAUTH_LOGIN_PAGE,
+  withMcpOfflineAccess,
+  type OfflineAccessClient,
+} from "./oauth-config";
 import { mayCreateAccount, mayReceiveMagicLink, parseBootstrapEmails } from "./sign-up-gate";
 
 /** decisions/0074: the error code the magic-link verify endpoint redirects to `/login` with
@@ -130,6 +138,17 @@ function buildAuth() {
     // `jwt()`'s session-to-JWT endpoint: not used anywhere, and a token from it is never
     // accepted by the MCP route (wrong audience, no `azp`, no scope) - disabled so it is not
     // even reachable.
+    hooks: {
+      // decisions/0078-mcp-server.md, "Refresh tokens": an MCP client asking for `digipost`
+      // without `offline_access` still gets a refresh token, or its connection would end with
+      // the 15-minute access token. Runs before the authorize endpoint parses the query.
+      before: createAuthMiddleware(async (ctx) => {
+        if (ctx.path !== "/oauth2/authorize" || !ctx.query || typeof ctx.query.client_id !== "string") return;
+        const client = await ctx.context.adapter.findOne<OfflineAccessClient>({ model: "oauthClient", where: [{ field: "clientId", value: ctx.query.client_id }] });
+        const query = withMcpOfflineAccess(ctx.query, client, MCP_OAUTH_SCOPES);
+        if (query) return { context: { query } };
+      }),
+    },
     disabledPaths: ["/token"],
     rateLimit: {
       enabled: true,
