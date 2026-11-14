@@ -60,6 +60,13 @@ const ServerEnv = z.object({
     .regex(/^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/, "INBOUND_EMAIL_DOMAIN must be a bare domain such as inbox.example.de")
     .optional(),
   INBOUND_MAIL_PROVIDER: z.enum(["resend", "fake"]).optional(),
+  // The external ledger API (src/platform/ledger-api, decisions/0081-ledger-via-api.md): all
+  // three optional. LEDGER_API_WORKSPACES is a comma-separated list of workspace ids whose
+  // bookkeeping runs on the API; unset or empty means none, and the ledger runs in-process
+  // exactly as before. LEDGER_API_KEY (the platform key) is read only by src/platform/ledger-api.
+  LEDGER_API_URL: z.url().optional(),
+  LEDGER_API_KEY: z.string().min(1).optional(),
+  LEDGER_API_WORKSPACES: z.string().optional(),
   SENTRY_DSN: z.url().optional(),
   // decisions/0074-sign-up-by-invitation-only.md: new accounts need a pending invitation. This
   // comma-separated list is the one exception, for the first admin of a fresh database whom

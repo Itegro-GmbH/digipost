@@ -14,7 +14,11 @@ Maintenance triggers:
 - A tax code, its USt-VA mapping, or the seed chart changes
 - A new write path touches a ledger table, or a control is added
 - The proposal engine or the UI stage lands (decisions/0080 phases)
-Last verified: 2026-11-13, decisions/0080 "MCP tools": the projections and actions are offered
+Last verified: 2026-11-13, decisions/0081-ledger-via-api.md stage A: "On the ledger API" (the
+router, the API-backed use cases, the source push), against
+`src/persistence/use-cases/ledger-api-use-cases.ts`, `ledger-api-source-push.ts`,
+`ledger-router.ts` and `src/persistence/composition/create-request-services.ts`. Previously
+2026-11-13, decisions/0080 "MCP tools": the projections and actions are offered
 as MCP tools. Previously 2026-11-12, notes after production use (decisions/0080): the settlement template
 nets Google's refunded fees, `tax_unverified` (no reverse charge guessed without printed tax
 figures, `core/tax-evidence.ts`), the advisor prompt's typical accounts, and `TaxBackfillCard`.
@@ -475,6 +479,44 @@ its proposal dismissed, every open-item account is at zero or explained, no prop
 unbalanced, no proposal waits, and the tax advisor's uploaded list for the period agrees. The
 unbooked checks start at the ledger's start date.
 
+## On the ledger API (decisions/0081, stage A)
+
+Per workspace and off by default, the books can run on the external ledger API instead of
+in-process. `LEDGER_API_WORKSPACES` (`src/platform/ledger-api`) lists the switched workspaces;
+with it unset, everything above applies unchanged.
+
+- **Routing.** The composition root's `ledger` is `createLedgerRouter`
+  (`src/persistence/use-cases/ledger-router.ts`): per call, by the call's workspace, the
+  API-backed use cases for a listed workspace, the in-process ones otherwise. Every entry point
+  (projections, actions, MCP tools, the job handlers) gets the router, so nothing else changes.
+- **The API-backed use cases** (`src/persistence/use-cases/ledger-api-use-cases.ts`) implement
+  `LedgerUseCases` with one operation per method (the table in decisions/0081). The acting user
+  is the `Ledger-Actor` (`digipost:system` for background work). An API code that is a ledger
+  code becomes the same `UseCaseError`, so the actions answer exactly as before;
+  `tenant_not_found` reads as `disabled`; anything else is rethrown and answered `unknown`.
+  `getSources` stays local (Digipost owns documents and transactions, `readLedgerSources` is
+  shared with the in-process implementation), `scheduleSync` enqueues Digipost's own
+  `ledger-sync` job, `autoMatchOpenItems` is a no-op (the API matches during its sync and after
+  booking), `syncChart` answers the chart, and `upsertProposal`/`listSourceKeys` throw (the
+  in-process engine's internals). `setSettings` changes only the VAT settings (`update_tenant`):
+  the API's books cannot be switched off; a workspace leaves the API by leaving the list.
+  `listEntries`' `changedSince` is filtered by each entry's `updatedAt`, since `list_entries`
+  has no such filter.
+- **The source push** (`src/persistence/use-cases/ledger-api-source-push.ts`), run by
+  `syncProposals` before `sync_proposals`: contacts (`upsert_counterparties`, a changed
+  verification only), payment aliases, money accounts (`update_money_account` when changed),
+  movements (`upsert_money_movements` for a new payout pairing or statement document),
+  settlement lines (`upsert_settlement_lines`), the `done` documents' accounting view
+  (`upsert_documents`, exactly what `listForLedger` reads, with a link back to the document
+  page), confirmed links (stale ones unlinked first, then new or changed allocations linked,
+  a refused batch retried one by one), then the no-document rules and each movement's mark set
+  to Digipost's. Counterparties, aliases, settlement lines and documents are upserted in full
+  each time (idempotent); accounts, movements, links and marks are diffed against what the API
+  lists, so only a change is written. Ids are Digipost's; a money account or movement the API does not hold yet is not
+  created (the API would give it a second id), only counted and logged
+  (`[ledger] sources not in the ledger API`, ids and counts only). Nothing in Digipost is
+  written by the push.
+
 ## Known gaps
 
 - The USt-VA preview books on the booking date; Ist-Versteuerung (`vat_basis = ist`) is stored
@@ -494,6 +536,9 @@ unbooked checks start at the ledger's start date.
   settings.
 - Platform fee tax codes are a default (`rc13b` for Google, none otherwise) until the tax
   advisor confirms them (decisions/0080 "Consequences").
+- On the ledger API (decisions/0081): new bank accounts and transactions of a switched
+  workspace (and their statement records) do not reach the API until it accepts their ids;
+  Digipost's own outgoing invoices are no source there; a deleted document stays in the API.
 
 ## Data
 
@@ -565,3 +610,7 @@ ansehen"), `tests/tax-backfill-card.test.tsx`, `src/persistence/tests/settlement
 (a misclassified Google report re-imported, its proposal updated) and
 `src/persistence/tests/tax-backfill.db.test.ts` (an Apple Ireland proposal from `tax_unverified`
 to `vst19` after the backfill).
+On the ledger API (decisions/0081): `src/persistence/tests/ledger-api-use-cases.test.ts` (every
+method's operation, input, tenant and actor; the error mapping; the sync order; the router off
+by default) and `src/persistence/tests/ledger-api-source-push.test.ts` (the snapshot, the diffs,
+no account or movement created with a second id); the client in `src/platform/ledger-api/tests/`.

@@ -35,6 +35,8 @@ import { createContactUseCases } from "@/persistence/use-cases/contacts-use-case
 import { createDocumentUseCases } from "@/persistence/use-cases/documents-use-cases";
 import { createInvoiceUseCases } from "@/persistence/use-cases/invoices-use-cases";
 import { createJobsUseCases } from "@/persistence/use-cases/jobs-use-cases";
+import { createApiLedgerUseCases } from "@/persistence/use-cases/ledger-api-use-cases";
+import { createLedgerRouter } from "@/persistence/use-cases/ledger-router";
 import { createLedgerUseCases } from "@/persistence/use-cases/ledger-use-cases";
 import { createMailIntakeUseCases } from "@/persistence/use-cases/mail-intake-use-cases";
 import { createPaymentsUseCases } from "@/persistence/use-cases/payments-use-cases";
@@ -45,6 +47,8 @@ import { getInvoiceRenderer } from "@/modules/invoicing/server";
 import { createSmtpMailer } from "@/platform/mailer/server";
 import { getDocumentAnalyzer, getIntakeClassifier, getLedgerBookingAdvisor, getOcrEngine, getPaymentArbiter } from "@/platform/mistral/server";
 import { getInboundEmailDomain, getInboundMailProvider } from "@/platform/inbound-mail/server";
+import { serverEnv } from "@/platform/env/server";
+import { getLedgerApiClient, usesLedgerApi } from "@/platform/ledger-api/server";
 import { getObjectStorage } from "@/platform/object-storage/server";
 
 export function createRequestServices() {
@@ -109,7 +113,16 @@ export function createRequestServices() {
   // invoices) through their owners' read methods. Phase 3's proposal engine gets the AI booking
   // advisor, bound by env exactly like the payment arbiter (`getLedgerBookingAdvisor()`: the
   // real Mistral adapter, the deterministic fake, or "not configured").
-  const ledger = createLedgerUseCases({ repos, uow, bookingAdvisor: getLedgerBookingAdvisor() });
+  //
+  // decisions/0081-ledger-via-api.md (stage A): a workspace listed in `LEDGER_API_WORKSPACES` keeps
+  // its books on the external ledger API instead; the router picks per call, so with the
+  // variable unset every workspace gets exactly the in-process ledger above. The job handlers
+  // below get the same router, so the `ledger-sync` job follows the same choice.
+  const ledger = createLedgerRouter({
+    local: createLedgerUseCases({ repos, uow, bookingAdvisor: getLedgerBookingAdvisor() }),
+    api: () => createApiLedgerUseCases({ repos, client: getLedgerApiClient(), appUrl: serverEnv().APP_URL }),
+    usesApi: usesLedgerApi,
+  });
 
   // "Handlers registered where they belong" (decisions/0016-processing-pipeline-and-ai.md):
   // `src/platform/jobs`'s generic runner never sees `documents`/`billing`/`workspaces`/

@@ -163,7 +163,7 @@ export const LEDGER_ERROR = {
 } as const satisfies Record<string, LedgerUseCaseErrorCode>;
 export type LedgerErrorCode = (typeof LEDGER_ERROR)[keyof typeof LEDGER_ERROR];
 
-const DEFAULT_SETTINGS: LedgerSettingsView = { enabled: false, vatPeriod: "month", vatBasis: "soll", startDate: null, chart: "skr04" };
+export const DEFAULT_LEDGER_SETTINGS: LedgerSettingsView = { enabled: false, vatPeriod: "month", vatBasis: "soll", startDate: null, chart: "skr04" };
 
 export type ProposalOutcome = "created" | "updated" | "kept";
 
@@ -287,12 +287,69 @@ export type LedgerUseCaseDeps = {
 /** Enough for a month of incoming mail in one run, small enough to stay inside a job's budget. */
 export const MAX_ADVICE_QUESTIONS_PER_SYNC = 40;
 
+/** `getSources`: the documents and bank transactions an entry or the review queue points at, read
+ * through their owners' ledger reads (never written). Shared with the API-backed ledger
+ * (`ledger-api-use-cases.ts`), where Digipost still owns both. */
+export async function readLedgerSources(
+  repos: Repositories,
+  workspaceId: string,
+  { documentIds, transactionIds }: { documentIds: readonly string[]; transactionIds: readonly string[] },
+): Promise<LedgerSourcesView> {
+  const wantedDocuments = new Set(documentIds);
+  const wantedTransactions = new Set(transactionIds);
+  const [documents, transactions, bankAccounts] = await Promise.all([
+    wantedDocuments.size > 0 ? repos.document.listForLedger(workspaceId) : Promise.resolve([]),
+    wantedTransactions.size > 0 ? repos.transaction.listForLedger(workspaceId) : Promise.resolve([]),
+    wantedTransactions.size > 0 ? repos.account.listForWorkspace(workspaceId) : Promise.resolve([]),
+  ]);
+  const accountNames = new Map(bankAccounts.map((account) => [account.id, account.name]));
+  return {
+    documents: documents
+      .filter((document) => wantedDocuments.has(document.id))
+      .map((document) => ({
+        id: document.id,
+        kind: document.kind,
+        direction: document.direction,
+        title: document.title,
+        sender: document.sender,
+        documentDate: document.documentDate,
+        effectiveDate: document.effectiveDate,
+        invoiceNumber: document.invoiceNumber,
+        totalAmountCents: document.totalAmountCents,
+        currency: document.currency,
+        netTotalCents: document.netTotalCents,
+        taxTotalCents: document.taxTotalCents,
+        taxBreakdown: document.taxBreakdown,
+        passThroughCents: document.passThroughCents,
+        reverseCharge: document.reverseCharge,
+        serviceDate: document.serviceDate,
+        servicePeriodFrom: document.servicePeriodFrom,
+        servicePeriodTo: document.servicePeriodTo,
+        contactId: document.contactId,
+        contactName: document.contactName,
+        originalFileName: document.originalFileName,
+      })),
+    transactions: transactions
+      .filter((transaction) => wantedTransactions.has(transaction.id))
+      .map((transaction) => ({
+        id: transaction.id,
+        accountId: transaction.accountId,
+        accountName: accountNames.get(transaction.accountId) ?? null,
+        bookingDate: transaction.bookingDate,
+        amountCents: transaction.amountCents,
+        currency: transaction.currency,
+        counterpartyName: transaction.counterpartyName,
+        remittanceText: transaction.remittanceText,
+      })),
+  };
+}
+
 // ---------------------------------------------------------------------------------------------
 // Mapping helpers
 // ---------------------------------------------------------------------------------------------
 
 function toSettingsView(row: LedgerSettingsRow | null): LedgerSettingsView {
-  if (!row) return DEFAULT_SETTINGS;
+  if (!row) return DEFAULT_LEDGER_SETTINGS;
   return { enabled: row.enabled, vatPeriod: row.vatPeriod, vatBasis: row.vatBasis, startDate: row.startDate, chart: row.chart };
 }
 
@@ -1152,55 +1209,9 @@ export function createLedgerUseCases(deps: LedgerUseCaseDeps): LedgerUseCases {
       return (await ledger.countEntries(workspaceId, { from: "0001-01-01", to: "9999-12-31" })).proposed;
     },
 
-    async getSources(workspaceId, { documentIds, transactionIds }) {
+    async getSources(workspaceId, input) {
       await requireEnabled(workspaceId);
-      const wantedDocuments = new Set(documentIds);
-      const wantedTransactions = new Set(transactionIds);
-      const [documents, transactions, bankAccounts] = await Promise.all([
-        wantedDocuments.size > 0 ? deps.repos.document.listForLedger(workspaceId) : Promise.resolve([]),
-        wantedTransactions.size > 0 ? deps.repos.transaction.listForLedger(workspaceId) : Promise.resolve([]),
-        wantedTransactions.size > 0 ? deps.repos.account.listForWorkspace(workspaceId) : Promise.resolve([]),
-      ]);
-      const accountNames = new Map(bankAccounts.map((account) => [account.id, account.name]));
-      return {
-        documents: documents
-          .filter((document) => wantedDocuments.has(document.id))
-          .map((document) => ({
-            id: document.id,
-            kind: document.kind,
-            direction: document.direction,
-            title: document.title,
-            sender: document.sender,
-            documentDate: document.documentDate,
-            effectiveDate: document.effectiveDate,
-            invoiceNumber: document.invoiceNumber,
-            totalAmountCents: document.totalAmountCents,
-            currency: document.currency,
-            netTotalCents: document.netTotalCents,
-            taxTotalCents: document.taxTotalCents,
-            taxBreakdown: document.taxBreakdown,
-            passThroughCents: document.passThroughCents,
-            reverseCharge: document.reverseCharge,
-            serviceDate: document.serviceDate,
-            servicePeriodFrom: document.servicePeriodFrom,
-            servicePeriodTo: document.servicePeriodTo,
-            contactId: document.contactId,
-            contactName: document.contactName,
-            originalFileName: document.originalFileName,
-          })),
-        transactions: transactions
-          .filter((transaction) => wantedTransactions.has(transaction.id))
-          .map((transaction) => ({
-            id: transaction.id,
-            accountId: transaction.accountId,
-            accountName: accountNames.get(transaction.accountId) ?? null,
-            bookingDate: transaction.bookingDate,
-            amountCents: transaction.amountCents,
-            currency: transaction.currency,
-            counterpartyName: transaction.counterpartyName,
-            remittanceText: transaction.remittanceText,
-          })),
-      };
+      return readLedgerSources(deps.repos, workspaceId, input);
     },
 
     async getEntry(workspaceId, entryId) {
