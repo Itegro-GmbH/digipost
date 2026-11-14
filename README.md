@@ -13,7 +13,8 @@ Maintenance triggers:
 - A new top-level owner root (`src/modules/`, `src/persistence/`, ...) is populated for the first
   time
 - `.github/workflows/ci.yml` changes what runs or when
-Last verified: 2026-11-05, decisions/0079-outgoing-invoices.md: added the "Rechnungen schreiben"
+Last verified: 2026-11-13, decisions/0081-ledger-via-api.md: the three `LEDGER_API_*` variables in
+the env table. Previously 2026-11-05, decisions/0079-outgoing-invoices.md: added the "Rechnungen schreiben"
 feature bullet and item 12a of "Before going to production" (no new environment variable).
 2026-11-03, decisions/0078-mcp-server.md: added the "MCP server for AI clients"
 feature bullet and item 5a of "Before going to production" (no new environment variable).
@@ -524,6 +525,8 @@ See `.env.example` for the authoritative, commented list; summarized here:
 | `INBOUND_EMAIL_DOMAIN`, `RESEND_WEBHOOK_SECRET` | optional (both needed for the E-Mail-Eingang; without them no address is shown and the webhook answers 503) | `src/platform/inbound-mail` (via `src/platform/env`) |
 | `RESEND_API_KEY` | optional (real attachment retrieval needs it; unset outside production binds the deterministic fake) | `src/platform/inbound-mail` (via `src/platform/env`) |
 | `INBOUND_MAIL_PROVIDER` | optional (`resend` \| `fake`, never `fake` in production) | `src/platform/inbound-mail` (via `src/platform/env`) |
+| `LEDGER_API_URL`, `LEDGER_API_KEY` | optional (needed only once a workspace is listed in `LEDGER_API_WORKSPACES`; the key is a secret) | `src/platform/ledger-api` (via `src/platform/env`) |
+| `LEDGER_API_WORKSPACES` | optional (comma-separated workspace ids whose bookkeeping runs on the external ledger API, decisions/0081; empty means none) | `src/platform/ledger-api` (via `src/platform/env`) |
 | `BILLING_TEST_MODE` | optional (default false; only `true` in local dev and the hermetic test stack, never production - no Stripe keys exist) | `src/modules/billing` (via `src/platform/env`) |
 | `SENTRY_DSN` | optional | `src/platform/observability`, `next.config.ts` |
 | `SENTRY_AUTH_TOKEN` | optional | build only (source map upload), `next.config.ts` |

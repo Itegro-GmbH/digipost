@@ -15,7 +15,9 @@ Maintenance triggers:
 - A new vendor SDK or a new sensitive env var is introduced
 - `scripts/structure/**` gains or loses a rule (keep the rule table and the
   ```structure block names in 1:1 correspondence, enforced by the checker itself)
-Last verified: 2026-11-12, decisions/0080-ledger-double-entry-bookkeeping.md added `src/modules/ledger`
+Last verified: 2026-11-13, decisions/0081-ledger-via-api.md added `src/platform/ledger-api` as a
+new owner and `LEDGER_API_KEY` to the `env-access` block (no new vendor SDK or root). Previously,
+2026-11-12, decisions/0080-ledger-double-entry-bookkeeping.md added `src/modules/ledger`
 as a new owner under the existing container rules (no new vendor SDK, env var or root). Previously,
 2026-11-05, decisions/0079-outgoing-invoices.md added `src/modules/invoicing` as a
 new owner under the existing container rules, and named `@itegro/einvoice` among the unrestricted
@@ -508,6 +510,7 @@ S3_FORCE_PATH_STYLE      src/platform/object-storage/, src/platform/env/
 MISTRAL_API_KEY          src/platform/mistral/, src/platform/env/
 RESEND_API_KEY           src/platform/inbound-mail/, src/platform/env/
 RESEND_WEBHOOK_SECRET    src/platform/inbound-mail/, src/platform/env/
+LEDGER_API_KEY           src/platform/ledger-api/, src/platform/env/
 ```
 
 A named variable above is allowed in the listed file(s)/prefix(es) and in any

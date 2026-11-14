@@ -9,7 +9,8 @@ Maintenance triggers:
 - Repository-wide safety or workflow rules change
 - STRUCTURE.md or the structure checker lands and changes what is machine-enforced
 - Documentation governance rules in DOC_RULES.md change
-Last verified: 2026-11-12, decisions/0080-ledger-double-entry-bookkeeping.md phase 3 (proposal
+Last verified: 2026-11-13, decisions/0081-ledger-via-api.md: added the `src/platform/ledger-api`
+owner (stage A, off by default). Previously 2026-11-12, decisions/0080-ledger-double-entry-bookkeeping.md phase 3 (proposal
 engine): `ledger_booking_advice` added to the ledger's tables, the AI booking advisor to the
 "Mistral and personal data" rule, and the ledger's read-only sources (settlement lines, issued
 invoices) to its owner bullet. Previously 2026-11-12, decisions/0080 (stage 1): added the
@@ -127,6 +128,12 @@ detail; `decisions/README.md` indexes the ADR behind each one):
   methods or read joins) and never books the synthetic transactions on clearing `accounts` rows.
   Its proposal engine (phase 3, `syncProposals`, the `ledger-sync` job) only ever writes
   `proposed` entries keyed by source and never touches a booked, edited or dismissed one.
+- `src/platform/ledger-api` - the HTTP client of the external ledger API and the per-workspace
+  switch `LEDGER_API_WORKSPACES` (decisions/0081-ledger-via-api.md, stage A: off by default; a
+  listed workspace's `ledger` use cases run on the API through
+  `src/persistence/use-cases/ledger-api-use-cases.ts`, which first pushes that workspace's
+  sources there). The only holder of `LEDGER_API_KEY`, which falls under the same "never read,
+  opened, or created by an agent" rule as `MISTRAL_API_KEY`.
 - `src/modules/dashboard-shell`, `src/modules/sign-in`, `src/platform/auth`,
   `src/platform/mailer`, `src/platform/api-pipeline`, `src/platform/observability`,
   `src/platform/env`, `src/persistence`, `src/shared/ui-primitives`, `src/i18n` - the
