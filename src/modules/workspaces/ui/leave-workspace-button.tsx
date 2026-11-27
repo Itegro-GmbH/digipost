@@ -10,9 +10,10 @@ import type { WorkspaceActionErrorCode } from "../core/error-codes";
 
 /**
  * "Arbeitsbereich verlassen" (F5, decisions/0027-hardening-and-deletion.md): rendered on
- * `/dashboard/team` for a non-admin member only (the page passes `isAdmin`, the use case
- * itself also rejects an admin with `cannot_leave_as_admin` - defense in depth, same shape
- * the danger zone/member-removal controls already use). A successful call redirects to
+ * `/dashboard/team` for everyone but the workspace's last admin
+ * (decisions/0082-several-admins-per-workspace.md; the use case itself also refuses the last
+ * admin with `last_admin` - defense in depth, same shape the danger zone/member-removal
+ * controls already use). A successful call redirects to
  * `/onboarding` inside the action itself, so there is no local "done" state to render.
  */
 export function LeaveWorkspaceButton() {

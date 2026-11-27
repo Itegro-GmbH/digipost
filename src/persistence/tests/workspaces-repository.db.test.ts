@@ -218,21 +218,19 @@ describe("createDrizzleWorkspaceMemberRepository", () => {
     expect(memberships.map((m) => m.member.role)).toEqual(["admin", "member"]);
   });
 
-  it("enforces exactly one admin per workspace (partial unique index)", async () => {
+  // decisions/0082-several-admins-per-workspace.md: the partial unique index
+  // `workspace_members_one_admin_key` is dropped, so a second admin inserts.
+  it("allows several admins in one workspace", async () => {
     const workspaceRepo = createDrizzleWorkspaceRepository(db);
     const memberRepo = createDrizzleWorkspaceMemberRepository(db);
-    const workspace = await workspaceRepo.create({ name: "One Admin Co" });
+    const workspace = await workspaceRepo.create({ name: "Two Admins Co" });
     const firstAdmin = await createTestUser();
     const secondAdmin = await createTestUser();
     await memberRepo.create({ workspaceId: workspace.id, userId: firstAdmin.id, role: "admin" });
 
-    const attempt = memberRepo.create({ workspaceId: workspace.id, userId: secondAdmin.id, role: "admin" });
-    try {
-      await attempt;
-      expect.unreachable("expected a second admin for the same workspace to fail");
-    } catch (err) {
-      expect(isDbError(err, "unique")).toBe(true);
-    }
+    await memberRepo.create({ workspaceId: workspace.id, userId: secondAdmin.id, role: "admin" });
+
+    expect(await memberRepo.countAdmins(workspace.id)).toBe(2);
   });
 
   it("allows multiple members with role member in the same workspace", async () => {

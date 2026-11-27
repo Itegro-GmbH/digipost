@@ -17,6 +17,7 @@ import { UseCaseError } from "@/persistence/use-cases/errors";
 import { createSmtpMailer } from "@/platform/mailer/server";
 import { serverEnv } from "@/platform/env/server";
 import { getObjectStorage } from "@/platform/object-storage/server";
+import { logAuditEvent } from "@/platform/observability/server";
 import type { ActionResult } from "@/shared/action-result";
 
 import {
@@ -27,6 +28,7 @@ import {
   inviteMemberInputSchema,
   removeMemberInputSchema,
   revokeInvitationInputSchema,
+  setMemberRoleInputSchema,
   switchWorkspaceInputSchema,
 } from "./core/schemas";
 import type { CompanyProfileActionErrorCode, WorkspaceActionErrorCode } from "./core/error-codes";
@@ -46,7 +48,7 @@ function mapUseCaseError(err: unknown): WorkspaceActionErrorCode {
       code === WORKSPACE_ERROR.invitationAlreadyUsed ||
       code === WORKSPACE_ERROR.invitationEmailMismatch ||
       code === WORKSPACE_ERROR.confirmationMismatch ||
-      code === WORKSPACE_ERROR.cannotLeaveAsAdmin ||
+      code === WORKSPACE_ERROR.lastAdmin ||
       code === WORKSPACE_ERROR.aliasTooGeneric ||
       code === WORKSPACE_ERROR.invoicesNotArchived
     ) {
@@ -238,7 +240,8 @@ export async function revokeInvitationAction(
 }
 
 /** Removes a member. Admin-only; the use case itself rejects removing yourself
- * (`cannot_remove_self`) before ever touching the repository. */
+ * (`cannot_remove_self`) before ever touching the repository, and removing the workspace's
+ * last admin (`last_admin`, decisions/0082-several-admins-per-workspace.md). */
 export async function removeMemberAction(
   input: unknown,
 ): Promise<ActionResult<undefined, WorkspaceActionErrorCode>> {
@@ -262,10 +265,51 @@ export async function removeMemberAction(
 }
 
 /**
- * A non-admin member leaves their own workspace ("Arbeitsbereich verlassen", F5,
+ * "Zum Admin machen" / "Admin-Rechte entziehen" (decisions/0082-several-admins-per-workspace.md).
+ * Admin-only (`PERMISSIONS.membersManage`, the same bundle as inviting and removing members);
+ * the workspace comes from the caller's resolved membership, the member id only selects within
+ * it. An admin may demote themself as long as another admin remains; the use case refuses the
+ * last admin with `last_admin` under the workspace row lock. A role that actually changed
+ * writes one audit line (ids and the new role only, no personal data). `selfChanged` tells the
+ * UI that the caller's own permissions just changed, so it re-renders from the server.
+ */
+export async function setMemberRoleAction(
+  input: unknown,
+): Promise<ActionResult<{ role: "admin" | "member"; selfChanged: boolean }, WorkspaceActionErrorCode>> {
+  const parsed = setMemberRoleInputSchema.safeParse(input);
+  if (!parsed.success) return { status: "error", errorCode: "invalid_input" };
+
+  const access = await requirePermission(PERMISSIONS.membersManage);
+  if (access.status === "error") return { status: "error", errorCode: access.errorCode };
+
+  try {
+    const result = await getRequestServices().workspaces.setMemberRole({
+      workspaceId: access.access.workspace.id,
+      memberId: parsed.data.memberId,
+      role: parsed.data.role,
+    });
+    const selfChanged = result.changed && parsed.data.memberId === access.access.membershipId;
+    if (result.changed) {
+      logAuditEvent("workspace.member_role_changed", {
+        workspaceId: access.access.workspace.id,
+        actorMembershipId: access.access.membershipId,
+        memberId: parsed.data.memberId,
+        role: result.role,
+      });
+      revalidatePath("/dashboard", "layout");
+    }
+    return { status: "success", data: { role: result.role, selfChanged } };
+  } catch (err) {
+    return { status: "error", errorCode: mapUseCaseError(err) };
+  }
+}
+
+/**
+ * A member leaves their own workspace ("Arbeitsbereich verlassen", F5,
  * decisions/0027-hardening-and-deletion.md). Any member may call this (no permission bundle
- * gate - it only ever acts on the caller's own membership), but the use case itself rejects
- * the workspace's own admin with `cannot_leave_as_admin` before touching the repository.
+ * gate - it only ever acts on the caller's own membership); an admin may leave too as long as
+ * another admin remains, the use case refuses the last one with `last_admin`
+ * (decisions/0082-several-admins-per-workspace.md).
  * `getWorkspaceAccess()` (never `requireWorkspaceMember()`, which redirects) is the correct
  * choice here: a Server Action has no page to redirect from mid-request.
  */

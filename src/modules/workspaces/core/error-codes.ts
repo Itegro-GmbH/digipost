@@ -15,7 +15,9 @@ export const WORKSPACE_ACTION_ERROR_CODES = [
   "invitation_already_used",
   "invitation_email_mismatch",
   "confirmation_mismatch",
-  "cannot_leave_as_admin",
+  // decisions/0082-several-admins-per-workspace.md: leaving, being removed or being demoted as
+  // the workspace's last admin (replaced F5's `cannot_leave_as_admin`).
+  "last_admin",
   // decisions/0034-extended-company-profile.md: `createWorkspaceAction` also calls
   // `updateCompanyProfile` right after `createForUser` (same as `updateCompanyProfileAction`
   // below), and onboarding collects `aliases` - the only extended-profile field that can

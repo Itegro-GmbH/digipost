@@ -9,7 +9,9 @@ Maintenance triggers:
 - Repository-wide safety or workflow rules change
 - STRUCTURE.md or the structure checker lands and changes what is machine-enforced
 - Documentation governance rules in DOC_RULES.md change
-Last verified: 2026-11-13, decisions/0081-ledger-via-api.md: added the `src/platform/ledger-api`
+Last verified: 2026-11-27, decisions/0082-several-admins-per-workspace.md: a workspace may have
+several admins and never fewer than one (the `src/modules/workspaces` owner bullet). Previously
+2026-11-13, decisions/0081-ledger-via-api.md: added the `src/platform/ledger-api`
 owner (stage A, off by default). Previously 2026-11-12, decisions/0080-ledger-double-entry-bookkeeping.md phase 3 (proposal
 engine): `ledger_booking_advice` added to the ledger's tables, the AI booking advisor to the
 "Mistral and personal data" rule, and the ledger's read-only sources (settlement lines, issued
@@ -61,13 +63,18 @@ your report if they conflict.
 detail; `decisions/README.md` indexes the ADR behind each one):
 
 - `src/modules/workspaces` + `src/platform/access` - tenancy (workspace, membership,
-  invitations, admin-only workspace deletion and non-admin member self-removal) and
+  invitations, admin-only workspace deletion, promoting/demoting admins and member
+  self-removal) and
   authorization (permission bundles, not role-string checks),
   decisions/0014-workspaces-and-access.md, decisions/0027-hardening-and-deletion.md. A user
   may belong to SEVERAL workspaces (decisions/0070-several-workspaces-per-user.md): the active
   one is resolved in exactly one place, `resolveAccess`, where the active-workspace cookie only
   selects among the memberships that request read from the database. Never add a second place
-  that decides the active workspace, and never trust that cookie for anything else.
+  that decides the active workspace, and never trust that cookie for anything else. A
+  workspace may have SEVERAL admins and never fewer than one
+  (decisions/0082-several-admins-per-workspace.md): `setMemberRole`/`removeMember`/
+  `leaveWorkspace` refuse the last admin (`last_admin`) under the workspace row lock, and no
+  other code changes `workspace_members.role` or deletes an admin's membership.
 - `src/modules/documents` - upload, storage, inbox (generated row names,
   decisions/0059-generated-document-names.md), detail view, quota enforcement, the universal intake recognizer's document-facing half (confirmation
   UI, deterministic camt.053/ZUGFeRD branches), the `purge-rejected-intake` retention cron,

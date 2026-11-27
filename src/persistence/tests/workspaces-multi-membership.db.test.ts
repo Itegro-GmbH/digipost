@@ -71,22 +71,8 @@ describe("workspace_members composite unique (decisions/0070-several-workspaces-
     }
   });
 
-  it("still rejects a second admin in one workspace (the pre-existing partial unique index is untouched)", async () => {
-    const workspaceRepo = createDrizzleWorkspaceRepository(db);
-    const memberRepo = createDrizzleWorkspaceMemberRepository(db);
-    const first = await createTestUser("admin-a");
-    const second = await createTestUser("admin-b");
-    const workspace = await workspaceRepo.create({ name: "Ein Admin GmbH" });
-
-    await memberRepo.create({ workspaceId: workspace.id, userId: first.id, role: "admin" });
-
-    try {
-      await memberRepo.create({ workspaceId: workspace.id, userId: second.id, role: "admin" });
-      expect.unreachable("expected a second admin for the same workspace to fail");
-    } catch (err) {
-      expect(isDbError(err, "unique")).toBe(true);
-    }
-  });
+  // The "second admin" case that used to sit here is gone: decisions/0082-several-admins-per-
+  // workspace.md dropped the partial unique index, see `workspaces-several-admins.db.test.ts`.
 });
 
 describe("membership resolution against real Postgres (decisions/0070-several-workspaces-per-user.md)", () => {

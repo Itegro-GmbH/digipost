@@ -13,11 +13,13 @@ Maintenance triggers:
 - The one-workspace-per-user or one-admin-per-workspace rule changes
 - A role beyond `admin`/`member` is introduced
 - The invitation flow's expiry, cap, or token format changes
-Last verified: 2026-09-19, P1 (tenancy)
+Last verified: 2026-11-27, supersession note for decisions/0082 added. Previously 2026-09-19, P1 (tenancy)
 
-> **Superseded on one point:** a user may now belong to several workspaces and switch
-> between them (decisions/0070-several-workspaces-per-user.md). The permission bundles, the
-> one-admin-per-workspace rule and everything else below still hold.
+> **Superseded on two points:** a user may now belong to several workspaces and switch
+> between them (decisions/0070-several-workspaces-per-user.md), and a workspace may have
+> several admins, never fewer than one (decisions/0082-several-admins-per-workspace.md: the
+> partial unique index named in point 1 is dropped). The permission bundles and everything
+> else below still hold.
 
 ## Status
 Accepted
@@ -123,4 +125,6 @@ This ADR also records that P1 removed the `projects` example module
   integration, and e2e tests (`src/modules/workspaces/README.md`'s "Tests" section).
 
 ## Supersedes / Superseded By
-- None
+- Superseded in part by decisions/0070-several-workspaces-per-user.md (one workspace per user)
+  and decisions/0082-several-admins-per-workspace.md (exactly one admin per workspace, superseded
+  on 2026-11-27).

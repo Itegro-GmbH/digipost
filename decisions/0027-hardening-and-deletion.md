@@ -22,7 +22,12 @@ Maintenance triggers:
 - The `notFound()`-returns-200 Next.js streaming behavior this ADR documents as an accepted
   limitation is ever actually fixed
 - A future phase reconsiders the 4 MB structured-upload cap or the unindexed transaction search
-Last verified: 2026-09-20, F5 (hardening)
+Last verified: 2026-11-27, supersession note for decisions/0082 added. Previously 2026-09-20, F5 (hardening)
+
+> **Superseded on one point:** an admin may now leave a workspace as long as another admin
+> remains, and `cannot_leave_as_admin` became `last_admin`
+> (decisions/0082-several-admins-per-workspace.md). Workspace deletion and everything else
+> below still hold.
 
 ## Status
 Accepted
@@ -328,4 +333,5 @@ raised retry count or a skipped assertion. Verified with `--repeat-each=3` (6/6 
   `pnpm test:e2e:docker`, `pnpm build`) were executed.
 
 ## Supersedes / Superseded By
-- None
+- Superseded in part by decisions/0082-several-admins-per-workspace.md (member self-removal: the
+  last admin, not every admin, is refused; superseded on 2026-11-27).

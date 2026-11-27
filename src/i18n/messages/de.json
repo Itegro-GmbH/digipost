@@ -357,7 +357,7 @@
         "invitation_already_used": "Diese Einladung wurde bereits verwendet.",
         "invitation_email_mismatch": "Diese Einladung wurde an eine andere E-Mail-Adresse gesendet.",
         "confirmation_mismatch": "Die eingegebene Bestätigung stimmt nicht überein.",
-        "cannot_leave_as_admin": "Als Administrator können Sie den Arbeitsbereich nicht verlassen. Löschen Sie ihn stattdessen, oder übertragen Sie zuerst die Administratorrolle.",
+        "last_admin": "Ein Arbeitsbereich braucht mindestens einen Administrator. Machen Sie zuerst ein anderes Mitglied zum Admin.",
         "alias_too_generic": "Dieser Markenname ist zu allgemein (z. B. nur eine Rechtsform wie \"GmbH\") oder zu kurz. Bitte verwenden Sie einen spezifischeren Namen.",
         "unknown": "Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut."
       }
@@ -401,7 +401,7 @@
       "invitation_already_used": "Diese Einladung wurde bereits verwendet.",
       "invitation_email_mismatch": "Diese Einladung wurde an eine andere E-Mail-Adresse gesendet.",
       "confirmation_mismatch": "Die eingegebene Bestätigung stimmt nicht überein.",
-      "cannot_leave_as_admin": "Als Administrator können Sie den Arbeitsbereich nicht verlassen. Löschen Sie ihn stattdessen, oder übertragen Sie zuerst die Administratorrolle.",
+      "last_admin": "Ein Arbeitsbereich braucht mindestens einen Administrator. Machen Sie zuerst ein anderes Mitglied zum Admin.",
       "alias_too_generic": "Dieser Markenname ist zu allgemein (z. B. nur eine Rechtsform wie \"GmbH\") oder zu kurz. Bitte verwenden Sie einen spezifischeren Namen.",
       "unknown": "Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut."
     }
@@ -423,7 +423,7 @@
       "cannot_remove_self": "Sie können sich nicht selbst entfernen.",
       "invitation_cap_reached": "Es sind bereits 50 offene Einladungen vorhanden.",
       "confirmation_mismatch": "Die eingegebene Bestätigung stimmt nicht überein.",
-      "cannot_leave_as_admin": "Als Administrator können Sie den Arbeitsbereich nicht verlassen. Löschen Sie ihn stattdessen, oder übertragen Sie zuerst die Administratorrolle.",
+      "last_admin": "Ein Arbeitsbereich braucht mindestens einen Administrator. Machen Sie zuerst ein anderes Mitglied zum Admin.",
       "alias_too_generic": "Dieser Markenname ist zu allgemein (z. B. nur eine Rechtsform wie \"GmbH\") oder zu kurz. Bitte verwenden Sie einen spezifischeren Namen.",
       "invoices_not_archived": "Bitte bestätigen Sie, dass Sie alle Rechnungen heruntergeladen haben.",
       "unauthenticated": "Bitte melden Sie sich erneut an.",
@@ -710,7 +710,12 @@
       "removeConfirm": "Dieses Mitglied entfernen?",
       "removeConfirmYes": "Ja, entfernen",
       "cancel": "Abbrechen",
-      "you": "Sie"
+      "you": "Sie",
+      "promote": "Zum Admin machen",
+      "demote": "Admin-Rechte entziehen",
+      "demoteConfirm": "Admin-Rechte entziehen? Diese Person sieht danach unter anderem keine Finanzdaten mehr.",
+      "demoteSelfConfirm": "Ihre eigenen Admin-Rechte entziehen? Sie können das danach nicht selbst rückgängig machen.",
+      "demoteConfirmYes": "Ja, entziehen"
     },
     "invitations": {
       "heading": "Offene Einladungen",
@@ -741,7 +746,7 @@
       "not_found": "Dieser Eintrag existiert nicht mehr.",
       "cannot_remove_self": "Sie können sich nicht selbst entfernen.",
       "confirmation_mismatch": "Die eingegebene Bestätigung stimmt nicht überein.",
-      "cannot_leave_as_admin": "Als Administrator können Sie den Arbeitsbereich nicht verlassen. Löschen Sie ihn stattdessen, oder übertragen Sie zuerst die Administratorrolle.",
+      "last_admin": "Ein Arbeitsbereich braucht mindestens einen Administrator. Machen Sie zuerst ein anderes Mitglied zum Admin.",
       "alias_too_generic": "Dieser Markenname ist zu allgemein (z. B. nur eine Rechtsform wie \"GmbH\") oder zu kurz. Bitte verwenden Sie einen spezifischeren Namen.",
       "forbidden": "Dafür fehlt Ihnen die Berechtigung.",
       "invoices_not_archived": "Bitte bestätigen Sie, dass Sie alle Rechnungen heruntergeladen haben.",
@@ -1056,7 +1061,7 @@
         "invitation_already_used": "Diese Einladung wurde bereits verwendet.",
         "invitation_email_mismatch": "Diese Einladung wurde an eine andere E-Mail-Adresse gesendet.",
         "confirmation_mismatch": "Der eingegebene Name stimmt nicht mit dem Namen des Arbeitsbereichs überein.",
-        "cannot_leave_as_admin": "Als Administrator können Sie den Arbeitsbereich nicht verlassen. Löschen Sie ihn stattdessen.",
+        "last_admin": "Ein Arbeitsbereich braucht mindestens einen Administrator. Machen Sie zuerst ein anderes Mitglied zum Admin.",
         "alias_too_generic": "Dieser Markenname ist zu allgemein (z. B. nur eine Rechtsform wie \"GmbH\") oder zu kurz. Bitte verwenden Sie einen spezifischeren Namen.",
         "invoices_not_archived": "Bitte bestätigen Sie, dass Sie alle Rechnungen heruntergeladen haben.",
         "unauthenticated": "Bitte melden Sie sich erneut an.",
