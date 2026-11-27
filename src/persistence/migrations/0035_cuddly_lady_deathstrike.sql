@@ -1,0 +1,1 @@
+DROP INDEX "workspace_members_one_admin_key";

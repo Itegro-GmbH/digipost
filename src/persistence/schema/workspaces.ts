@@ -4,8 +4,9 @@
 //
 // Tenancy model: a user may belong to SEVERAL workspaces
 // (decisions/0070-several-workspaces-per-user.md) but never twice to the same one (the
-// composite unique index on `(workspace_id, user_id)` below), with exactly one admin per
-// workspace (the partial unique index below). There is no role beyond `admin`/`member`
+// composite unique index on `(workspace_id, user_id)` below), with at least one admin per
+// workspace and possibly several (decisions/0082-several-admins-per-workspace.md, enforced by
+// the use cases, not by an index). There is no role beyond `admin`/`member`
 // (PRD: "kein Rechte-Management") - authorization is modeled as permission bundles per role
 // in `src/platform/access`, not as scattered role string checks. Which of a user's
 // workspaces is the ACTIVE one for a given request is resolved in exactly one place,
@@ -111,12 +112,11 @@ export const workspaceMembers = pgTable(
     // behind `acceptInvitation`'s own `already_in_workspace` pre-check, exactly the way the
     // dropped unique on `userId` alone used to back `createForUser`.
     uniqueIndex("workspace_members_workspace_user_key").on(t.workspaceId, t.userId),
-    // Exactly one admin per workspace (PRD). A partial unique index, not a check
-    // constraint: Postgres has no "at most one row where role = 'admin'" constraint
-    // form other than a unique index scoped by a WHERE predicate.
-    uniqueIndex("workspace_members_one_admin_key")
-      .on(t.workspaceId)
-      .where(sql`${t.role} = 'admin'`),
+    // decisions/0082-several-admins-per-workspace.md: a workspace may have SEVERAL admins,
+    // so the partial unique index `workspace_members_one_admin_key` ("exactly one admin")
+    // is gone. "At least one admin" is enforced by `workspaces-use-cases.ts`
+    // (`removeMember`/`leaveWorkspace`/`setMemberRole`, each under the workspace row lock),
+    // not by the database: see that ADR for why there is no trigger.
   ],
 );
 

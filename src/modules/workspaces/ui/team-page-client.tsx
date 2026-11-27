@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 
 import type { PendingInvitationListItem, WorkspaceMemberListItem } from "../core/types";
@@ -14,7 +15,7 @@ import { MemberItem } from "./member-item";
  * own response data (instant feedback, WEBAPP_TEMPLATE_SPEC.md §8's ~100ms rule). Everyone
  * sees the member list and pending invitations; only `canManageMembers` (the caller's own
  * `members.manage` permission, resolved server-side by `src/platform/access`) renders the
- * invite form and the revoke/remove controls. */
+ * invite form and the revoke/remove/promote/demote controls. */
 export function TeamPageClient({
   members: initialMembers,
   invitations: initialInvitations,
@@ -29,13 +30,16 @@ export function TeamPageClient({
   const t = useTranslations("Team");
   const [members, setMembers] = useState(initialMembers);
   const [invitations, setInvitations] = useState(initialInvitations);
-  // F5 (decisions/0027-hardening-and-deletion.md): "Arbeitsbereich verlassen" is only for a
-  // non-admin member - an admin who wants out deletes the workspace instead (the danger zone
-  // on `/dashboard/settings/company`), since there is no admin-transfer flow. Derived from
-  // the member list itself (already scoped to this workspace) rather than a separate prop,
-  // so it always agrees with what the list actually shows for "you".
+  const router = useRouter();
+  // F5 (decisions/0027-hardening-and-deletion.md), relaxed by
+  // decisions/0082-several-admins-per-workspace.md: "Arbeitsbereich verlassen" is offered to
+  // everyone but the LAST admin - that one promotes someone else first or deletes the workspace
+  // (the danger zone on `/dashboard/settings/company`). Derived from the member list itself
+  // (already scoped to this workspace) rather than a separate prop, so it always agrees with
+  // what the list actually shows; the use case re-checks it (`last_admin`).
   const currentMember = members.find((m) => m.id === currentMembershipId);
-  const canLeave = currentMember !== undefined && currentMember.role !== "admin";
+  const adminCount = members.filter((m) => m.role === "admin").length;
+  const canLeave = currentMember !== undefined && (currentMember.role !== "admin" || adminCount > 1);
 
   function handleInvited(invitation: PendingInvitationListItem) {
     setInvitations((current) => [invitation, ...current]);
@@ -47,6 +51,13 @@ export function TeamPageClient({
 
   function handleRemoved(id: string) {
     setMembers((current) => current.filter((m) => m.id !== id));
+  }
+
+  function handleRoleChanged(id: string, role: WorkspaceMemberListItem["role"], selfChanged: boolean) {
+    setMembers((current) => current.map((m) => (m.id === id ? { ...m, role } : m)));
+    // The caller's own permissions changed (they demoted themself): `canManageMembers` and the
+    // navigation come from the server, so re-render from there.
+    if (selfChanged) router.refresh();
   }
 
   return (
@@ -67,7 +78,9 @@ export function TeamPageClient({
               member={member}
               isSelf={member.id === currentMembershipId}
               canManageMembers={canManageMembers}
+              otherAdminExists={members.some((m) => m.role === "admin" && m.id !== member.id)}
               onRemoved={handleRemoved}
+              onRoleChanged={handleRoleChanged}
             />
           ))}
         </ul>

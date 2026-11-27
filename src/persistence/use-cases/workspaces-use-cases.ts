@@ -34,12 +34,11 @@ export const WORKSPACE_ERROR = {
   /** F5 (decisions/0027-hardening-and-deletion.md): `deleteWorkspace`'s typed confirmation
    * (the caller must re-type the workspace's exact current name) did not match. */
   confirmationMismatch: "confirmation_mismatch",
-  /** F5: `leaveWorkspace` called by the workspace's own admin - blocked, since a workspace
-   * always needs exactly one admin (the partial unique index) and there is no
-   * admin-transfer flow; an admin who wants out deletes the workspace instead
-   * (`deleteWorkspace`), which is a deliberate, typed-confirmation decision, not an
-   * accidental click. */
-  cannotLeaveAsAdmin: "cannot_leave_as_admin",
+  /** decisions/0082-several-admins-per-workspace.md (replacing F5's `cannot_leave_as_admin`):
+   * the change would leave the workspace without any admin - leaving, being removed, or being
+   * demoted as its LAST admin. A workspace always keeps at least one; the last admin either
+   * promotes someone else first or deletes the workspace (`deleteWorkspace`). */
+  lastAdmin: "last_admin",
   /** decisions/0034-extended-company-profile.md: `updateCompanyProfile`'s extended-profile
    * alias list contains an entry that is either shorter than `COMPANY_ALIAS_MIN_LENGTH` after
    * trimming, or normalizes to nothing but a bare legal form ("GbR", "GmbH", "UG", ...) -
@@ -154,14 +153,15 @@ export interface WorkspaceUseCases {
    * active-workspace cookie is absent, malformed, or names a workspace the user is not a
    * member of (decisions/0070-several-workspaces-per-user.md). */
   getMembershipForUser(userId: string): Promise<MembershipWithWorkspace | null>;
-  /** `null` if the workspace does not exist; `adminEmail` is `null` only in the
-   * theoretically-impossible case of a workspace with no admin member (the partial unique
-   * index guarantees at most one, never zero, once `createForUser` has run - `removeMember`
-   * never allows removing the sole admin either). Read by
-   * `src/persistence/composition/job-handlers.ts`'s `send-quota-warning` handler (P3,
-   * decisions/0017-billing-tiers-and-packages.md) to address and personalize the 80%
-   * warning e-mail. */
-  getWorkspaceWithAdminContact(workspaceId: string): Promise<{ workspace: Workspace; adminEmail: string | null } | null>;
+  /** `null` if the workspace does not exist. `adminEmails` lists EVERY admin's e-mail address,
+   * oldest membership first (decisions/0082-several-admins-per-workspace.md: a workspace may
+   * have several admins, and each of them gets the admin notices); empty only in the
+   * theoretically-impossible case of a workspace with no admin (`createForUser` makes one, and
+   * `removeMember`/`leaveWorkspace`/`setMemberRole` never take away the last). Read by
+   * `src/persistence/composition/job-handlers.ts`'s `send-quota-warning` (P3,
+   * decisions/0017-billing-tiers-and-packages.md) and `send-mail-intake-notification`
+   * (decisions/0075-email-intake.md) handlers. */
+  getWorkspaceWithAdminContacts(workspaceId: string): Promise<{ workspace: Workspace; adminEmails: string[] } | null>;
   listMembers(workspaceId: string): Promise<{ members: WorkspaceMemberView[]; invitations: PendingInvitationView[] }>;
   /** Invites `email` to `workspaceId`. Replaces any existing pending invitation for the
    * same email (re-inviting), enforces the pending-invitation cap, and returns the plain
@@ -173,14 +173,24 @@ export interface WorkspaceUseCases {
   }): Promise<{ invitationId: string; token: string; email: string; expiresAt: Date; createdAt: Date }>;
   revokeInvitation(input: { workspaceId: string; invitationId: string }): Promise<void>;
   /** `actorMembershipId` is the caller's own membership id; removing it directly fails
-   * with `cannot_remove_self` before ever reaching the repository. */
+   * with `cannot_remove_self` before ever reaching the repository (leaving is
+   * `leaveWorkspace`). Removing another admin is allowed, but never the workspace's last one
+   * (`last_admin`, checked under the workspace row lock, decisions/0082). */
   removeMember(input: { workspaceId: string; actorMembershipId: string; memberId: string }): Promise<void>;
-  /** F5 (decisions/0027-hardening-and-deletion.md): a non-admin member leaves their own
-   * workspace ("Arbeitsbereich verlassen") - the same membership cleanup as `removeMember`,
-   * but self-initiated and rejecting the workspace's own admin
-   * with `cannot_leave_as_admin` before ever touching the repository (mirroring
-   * `removeMember`'s own `cannot_remove_self` pre-check shape). */
+  /** F5 (decisions/0027-hardening-and-deletion.md): a member leaves their own workspace
+   * ("Arbeitsbereich verlassen") - the same membership cleanup as `removeMember`, but
+   * self-initiated. Since decisions/0082-several-admins-per-workspace.md an admin may leave
+   * too, as long as another admin remains; the last admin gets `last_admin` (checked under
+   * the workspace row lock). */
   leaveWorkspace(input: { workspaceId: string; membershipId: string }): Promise<void>;
+  /** decisions/0082-several-admins-per-workspace.md: makes a member an admin ("Zum Admin
+   * machen") or an admin a member ("Admin-Rechte entziehen"), including the caller themself.
+   * Runs under the workspace row lock (the same `lockForUpdate` every other admin-count
+   * decision takes), so two admins demoting each other at the same moment serialize and the
+   * second one gets `last_admin` instead of both succeeding. Setting the role a member already
+   * has is a no-op success (`changed: false`). `not_found` for a member that is not in
+   * `workspaceId`. Authorization (`members.manage`) is the caller's job. */
+  setMemberRole(input: { workspaceId: string; memberId: string; role: Role }): Promise<{ role: Role; changed: boolean }>;
   /** F5 (decisions/0027-hardening-and-deletion.md): permanently deletes the ENTIRE workspace
    * - every document, job, contact, account, transaction, settlement line, invitation,
    * membership, usage/purchase record, and intake fingerprint it owns (every workspace-owned
@@ -414,6 +424,27 @@ async function deleteMembershipAndCleanUp(repos: Repositories, workspaceId: stri
   if (!row) throw new UseCaseError(WORKSPACE_ERROR.notFound);
 }
 
+/** decisions/0082-several-admins-per-workspace.md: the one guard behind "a workspace always
+ * keeps at least one admin". Must run inside the caller's transaction, AFTER
+ * `repos.workspace.lockForUpdate(workspaceId)`: the lock makes every admin-count decision for
+ * one workspace serialize, so the count read here cannot be stale by the time the caller's
+ * delete/update commits. Throws `last_admin` when `member` is an admin and no other admin
+ * exists; a non-admin never trips it. */
+async function assertNotLastAdmin(repos: Repositories, workspaceId: string, member: WorkspaceMemberRow): Promise<void> {
+  if (member.role !== "admin") return;
+  if ((await repos.workspaceMember.countAdmins(workspaceId)) <= 1) throw new UseCaseError(WORKSPACE_ERROR.lastAdmin);
+}
+
+/** Locks the workspace row (see `assertNotLastAdmin`) and loads one of its members, `not_found`
+ * when either is missing. */
+async function lockWorkspaceAndFindMember(repos: Repositories, workspaceId: string, memberId: string): Promise<WorkspaceMemberRow> {
+  const workspace = await repos.workspace.lockForUpdate(workspaceId);
+  if (!workspace) throw new UseCaseError(WORKSPACE_ERROR.notFound);
+  const member = await repos.workspaceMember.findById(workspaceId, memberId);
+  if (!member) throw new UseCaseError(WORKSPACE_ERROR.notFound);
+  return member;
+}
+
 /** decisions/0037-correction-buttons.md: the current row's own company-profile columns as a
  * full `CompanyProfileFields`, unchanged - `addCompanyAlias`/`addCompanyIban` start from this
  * and only ever replace ONE list field, since `WorkspaceRepository.updateCompanyProfile`
@@ -506,12 +537,13 @@ export function createWorkspaceUseCases(deps: {
       return oldest ?? null;
     },
 
-    async getWorkspaceWithAdminContact(workspaceId) {
+    async getWorkspaceWithAdminContacts(workspaceId) {
       const workspace = await deps.repos.workspace.findById(workspaceId);
       if (!workspace) return null;
+      // `listByWorkspace` is ordered by `joined_at`, so the oldest admin comes first.
       const members = await deps.repos.workspaceMember.listByWorkspace(workspaceId);
-      const admin = members.find((m) => m.role === "admin");
-      return { workspace: toWorkspace(workspace), adminEmail: admin?.email ?? null };
+      const adminEmails = members.filter((m) => m.role === "admin").map((m) => m.email);
+      return { workspace: toWorkspace(workspace), adminEmails };
     },
 
     async listMembers(workspaceId) {
@@ -590,16 +622,30 @@ export function createWorkspaceUseCases(deps: {
       if (actorMembershipId === memberId) throw new UseCaseError(WORKSPACE_ERROR.cannotRemoveSelf);
 
       await deps.uow.transaction(async (repos) => {
+        const member = await lockWorkspaceAndFindMember(repos, workspaceId, memberId);
+        await assertNotLastAdmin(repos, workspaceId, member);
         await deleteMembershipAndCleanUp(repos, workspaceId, memberId);
       });
     },
 
     async leaveWorkspace({ workspaceId, membershipId }) {
       await deps.uow.transaction(async (repos) => {
-        const membership = await repos.workspaceMember.findById(workspaceId, membershipId);
-        if (!membership) throw new UseCaseError(WORKSPACE_ERROR.notFound);
-        if (membership.role === "admin") throw new UseCaseError(WORKSPACE_ERROR.cannotLeaveAsAdmin);
+        const membership = await lockWorkspaceAndFindMember(repos, workspaceId, membershipId);
+        await assertNotLastAdmin(repos, workspaceId, membership);
         await deleteMembershipAndCleanUp(repos, workspaceId, membershipId);
+      });
+    },
+
+    async setMemberRole({ workspaceId, memberId, role }) {
+      if (role !== "admin" && role !== "member") throw new UseCaseError(WORKSPACE_ERROR.invalidInput);
+
+      return await deps.uow.transaction(async (repos) => {
+        const member = await lockWorkspaceAndFindMember(repos, workspaceId, memberId);
+        if (member.role === role) return { role, changed: false };
+        if (role === "member") await assertNotLastAdmin(repos, workspaceId, member);
+        const updated = await repos.workspaceMember.updateRole(workspaceId, memberId, role);
+        if (!updated) throw new UseCaseError(WORKSPACE_ERROR.notFound);
+        return { role: updated.role, changed: true };
       });
     },
 

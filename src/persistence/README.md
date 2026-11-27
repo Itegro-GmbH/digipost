@@ -397,7 +397,8 @@ handlers })` (P2b) is wired last: `handlers` comes from `composition/job-handler
 from the already-constructed `documents`/`billing`/`workspaces` use cases and a `Mailer` -
 "handlers registered where they belong" (decisions/0016), so
 `src/platform/jobs`/`jobs-use-cases.ts` stay domain-free; P3 added the `send-quota-warning`
-handler the same way, reading `workspaces.getWorkspaceWithAdminContact` and
+handler the same way, reading `workspaces.getWorkspaceWithAdminContacts` (every admin since
+decisions/0082-several-admins-per-workspace.md, one mail each) and
 `billing.getUsage`/`documents.countStored` to render and send the 80% warning e-mail. P7
 (D2/D3, real-API defect fixes): `jobs-use-cases.ts`'s own `runOne` now logs every job
 failure (`console.warn` for a retryable attempt, `console.error` for the terminal one -

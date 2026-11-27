@@ -155,16 +155,15 @@ export function createFakeWorkspaceMemberRepository(
       if (rows.some((m) => m.userId === input.userId && m.workspaceId === input.workspaceId)) {
         throw fakeDbError("23505", "workspace_members_workspace_user_key");
       }
-      if (input.role === "admin" && rows.some((m) => m.workspaceId === input.workspaceId && m.role === "admin")) {
-        throw fakeDbError("23505", "workspace_members_one_admin_key");
-      }
       const row = memberRow(input);
       rows.push(row);
       return row;
     },
     async listByWorkspace(workspaceId) {
+      // Ordered by `joined_at`, like the real repository.
       return rows
         .filter((m) => m.workspaceId === workspaceId)
+        .sort((a, b) => a.joinedAt.getTime() - b.joinedAt.getTime())
         .map((m) => ({ ...m, email: users[m.userId]?.email ?? "unknown@example.test", name: users[m.userId]?.name ?? "Unknown" }));
     },
     async deleteById(workspaceId, memberId) {
@@ -172,6 +171,15 @@ export function createFakeWorkspaceMemberRepository(
       if (index === -1) return null;
       const [row] = rows.splice(index, 1);
       return row ?? null;
+    },
+    async countAdmins(workspaceId) {
+      return rows.filter((m) => m.workspaceId === workspaceId && m.role === "admin").length;
+    },
+    async updateRole(workspaceId, memberId, role) {
+      const row = rows.find((m) => m.id === memberId && m.workspaceId === workspaceId);
+      if (!row) return null;
+      row.role = role;
+      return row;
     },
   };
 

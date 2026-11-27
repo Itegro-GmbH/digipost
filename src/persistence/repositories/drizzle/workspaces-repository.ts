@@ -2,7 +2,7 @@
 // transitions, no external calls (WEBAPP_TEMPLATE_SPEC.md §5.3). Every workspace-scoped
 // method takes `workspaceId` and filters on it explicitly, even though the use case will
 // already have resolved it from the caller's own session membership.
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, count, eq, isNull } from "drizzle-orm";
 
 import type { DbExecutor } from "@/persistence/foundation/db-types";
 import { user } from "@/persistence/schema/auth";
@@ -108,6 +108,23 @@ export function createDrizzleWorkspaceMemberRepository(db: DbExecutor): Workspac
     async deleteById(workspaceId, memberId) {
       const [row] = await db
         .delete(workspaceMembers)
+        .where(and(eq(workspaceMembers.id, memberId), eq(workspaceMembers.workspaceId, workspaceId)))
+        .returning();
+      return row ?? null;
+    },
+
+    async countAdmins(workspaceId) {
+      const [row] = await db
+        .select({ value: count() })
+        .from(workspaceMembers)
+        .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.role, "admin")));
+      return row?.value ?? 0;
+    },
+
+    async updateRole(workspaceId, memberId, role) {
+      const [row] = await db
+        .update(workspaceMembers)
+        .set({ role })
         .where(and(eq(workspaceMembers.id, memberId), eq(workspaceMembers.workspaceId, workspaceId)))
         .returning();
       return row ?? null;

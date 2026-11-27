@@ -120,6 +120,13 @@ export interface WorkspaceMemberRepository {
   listByWorkspace(workspaceId: string): Promise<WorkspaceMemberWithUser[]>;
   /** Deletes the member row scoped to `workspaceId`; `null` (not an error) if it does not exist. */
   deleteById(workspaceId: string, memberId: string): Promise<WorkspaceMemberRow | null>;
+  /** How many members of `workspaceId` currently hold the `admin` role
+   * (decisions/0082-several-admins-per-workspace.md). Called under the workspace row lock by
+   * every use case that could take away the last admin. */
+  countAdmins(workspaceId: string): Promise<number>;
+  /** Sets the member's role, scoped to `workspaceId`; `null` (not an error) if the member does
+   * not exist there. No rule checks: the "at least one admin" rule lives in the use case. */
+  updateRole(workspaceId: string, memberId: string, role: WorkspaceMemberRow["role"]): Promise<WorkspaceMemberRow | null>;
 }
 
 export interface WorkspaceInvitationRepository {

@@ -89,6 +89,10 @@ export const companyProfileInputSchema = z.object({ ...companyAddressFields, ...
 export const inviteMemberInputSchema = z.object({ email: invitationEmail });
 export const revokeInvitationInputSchema = z.object({ invitationId: z.uuid() });
 export const removeMemberInputSchema = z.object({ memberId: z.uuid() });
+/** "Zum Admin machen"/"Admin-Rechte entziehen" (decisions/0082-several-admins-per-workspace.md).
+ * The member id only selects among the caller's own workspace's members: the use case scopes it
+ * by the workspace resolved from the session. */
+export const setMemberRoleInputSchema = z.object({ memberId: z.uuid(), role: z.enum(["admin", "member"]) });
 /** The workspace switcher's input (decisions/0070-several-workspaces-per-user.md). `z.uuid()`
  * only rejects a malformed id; whether the caller may actually have that workspace is decided
  * server-side by `getMembershipInWorkspace`, never by this schema. */

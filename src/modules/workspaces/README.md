@@ -14,7 +14,17 @@ Maintenance triggers:
 - `src/platform/access`'s permission bundles change what this module's actions check
 - The company-profile onboarding/settings fields or the "profile incomplete" banner's
   condition change (decisions/0021-extraction-direction-and-invoice-fields.md, C2)
-Last verified: 2026-11-05, decisions/0079-outgoing-invoices.md: workspace deletion requires `invoicesArchived` once the workspace issued invoices. Previously 2026-10-03, decisions/0070-several-workspaces-per-user.md: a user may belong to
+Last verified: 2026-11-27, decisions/0082-several-admins-per-workspace.md: a workspace may have
+several admins and never fewer than one. The partial unique index `workspace_members_one_admin_key`
+is dropped (migration `0035_cuddly_lady_deathstrike.sql`). New `setMemberRoleAction`
+(`members.manage`) and `WorkspaceUseCases.setMemberRole` ("Zum Admin machen"/"Admin-Rechte
+entziehen" on `/dashboard/team`, with a confirmation for demoting, a role pill per member);
+`removeMember`/`leaveWorkspace`/`setMemberRole` lock the workspace row and refuse the last admin
+with `last_admin`, which replaced `cannot_leave_as_admin` (an admin may now leave while another
+admin remains). `WorkspaceMemberRepository` gained `countAdmins`/`updateRole`.
+`getWorkspaceWithAdminContact` became `getWorkspaceWithAdminContacts` (every admin, oldest first;
+the quota warning and the E-Mail-Eingang notice go to each). A role change writes the audit line
+`workspace.member_role_changed`. Previously 2026-11-05, decisions/0079-outgoing-invoices.md: workspace deletion requires `invoicesArchived` once the workspace issued invoices. Previously 2026-10-03, decisions/0070-several-workspaces-per-user.md: a user may belong to
 SEVERAL workspaces. `workspace_members.user_id` lost its unique constraint; a composite unique
 on `(workspace_id, user_id)` plus a plain index on `user_id` replaced it (migration
 `0021_glamorous_epoch.sql`). `WorkspaceUseCases` gained `listMembershipsForUser(userId)`
@@ -111,8 +121,14 @@ decisions/0016-processing-pipeline-and-ai.md
 A workspace (Firma/Team) has a name and a tier; a user may belong to SEVERAL workspaces
 (decisions/0070-several-workspaces-per-user.md: one login, several companies, kept completely
 separate), but never twice to the same one, with a role of `admin` or `member` per workspace
-and exactly one admin per workspace (both enforced at the database level, not only in
-application code - `src/persistence/schema/workspaces.ts`). Which of them is ACTIVE for a
+(the composite unique is enforced at the database level, `src/persistence/schema/workspaces.ts`).
+A workspace has at least one admin and may have several
+(decisions/0082-several-admins-per-workspace.md): an admin promotes a member ("Zum Admin
+machen") or takes an admin's rights away ("Admin-Rechte entziehen"), their own included as long
+as another admin remains. "At least one" is enforced by the use cases, not by the database:
+`setMemberRole`, `removeMember` and `leaveWorkspace` each lock the workspace row
+(`lockForUpdate`), count the admins and refuse the last one with `last_admin`, so two admins
+demoting each other at the same moment end with one admin, never none. Which of them is ACTIVE for a
 given request is not stored here at all: it lives in a cookie and is resolved in exactly one
 place, `src/platform/access`'s `resolveAccess`. Tier and quota are per workspace, so a second
 company starts on the free tier with its own quota - nothing is shared across a user's
@@ -147,8 +163,11 @@ there are, links the ZIP of all of them (`GET /api/invoices/export`) and asks fo
   `switchWorkspaceAction` (decisions/0070: any member, acts only on the caller's own cookie,
   and verifies the membership against the database before writing it - `redirect`s to
   `/dashboard` on success),
+  `setMemberRoleAction` (decisions/0082, admin-only, `members.manage`: promote or demote one
+  member of the caller's workspace, `last_admin` for the last admin, an audit line per real
+  change, `selfChanged` so the page re-renders when the caller demoted themself),
   `leaveWorkspaceAction` (any member,
-  rejects the workspace's own admin), `deleteWorkspaceAction` (admin-only,
+  refuses the workspace's last admin), `deleteWorkspaceAction` (admin-only,
   `workspace.manage`, F5) - each returning
   `ActionResult<TData, WorkspaceActionErrorCode>`
   (`@/shared/action-result`), except the last two which `redirect("/onboarding")` on success
@@ -196,15 +215,17 @@ server code.
   your company profile" banner (C2), rendered by `src/app/(app)/dashboard/page.tsx`.
 - `ui/invite-member-form.tsx`, `ui/member-item.tsx`, `ui/invitation-item.tsx`,
   `ui/team-page-client.tsx` - the `/dashboard/team` page's client island: everyone sees the
-  member list and pending invitations; only `canManageMembers` (the caller's own
-  `members.manage` permission) renders the invite form and the revoke/remove controls.
+  member list (with a role pill) and pending invitations; only `canManageMembers` (the caller's
+  own `members.manage` permission) renders the invite form and the revoke/remove/promote/demote
+  controls. "Admin-Rechte entziehen" asks for a confirmation and is not offered for the last
+  admin (decisions/0082).
 - `ui/invite-accept-form.tsx` - the `/invite/[token]` page's accept button, rendered only
   once the server-side preview (`getInvitationPreview`) already succeeded.
 - `ui/workspace-danger-zone.tsx` - `/dashboard/settings/company`'s danger zone (F5,
   decisions/0027-hardening-and-deletion.md): typed re-entry of the exact workspace name
   before "Endgültig löschen" enables, re-checked server-side regardless.
 - `ui/leave-workspace-button.tsx` - `/dashboard/team`'s "Arbeitsbereich verlassen" (F5),
-  rendered only for the caller's own row when its role is not `admin`.
+  rendered for the caller unless they are the workspace's last admin (decisions/0082).
 
 ## Dependencies on other owners
 
@@ -217,6 +238,8 @@ server code.
 the name-length constants), `@/persistence/use-cases/errors` (`UseCaseError`),
 `@/shared/action-result` (`ActionResult`), `@/shared/ui-primitives` (`Button`, `Input`,
 `Label`).
+`@/platform/observability/server` (`logAuditEvent`, decisions/0082: `setMemberRoleAction`'s
+audit line).
 `@/platform/object-storage/server` (`getObjectStorage`, F5: `deleteWorkspaceAction`'s
 immediate best-effort `listObjects`/`deleteObjects` after the use case's own transaction
 commits), `next/navigation` (`redirect`, F5: `leaveWorkspaceAction`/`deleteWorkspaceAction`
@@ -234,9 +257,10 @@ reads workspace membership through `getRequestServices().workspaces` (not throug
 module directly - `src/platform/access` calls the persistence use case itself, the same
 seam this module's own read models use).
 `src/persistence/composition/job-handlers.ts` (P3, decisions/0017-billing-tiers-and-packages.md)
-calls the persistence use case's `getWorkspaceWithAdminContact` directly (a composition-rank
+calls the persistence use case's `getWorkspaceWithAdminContacts` directly (a composition-rank
 file, not this module's own `server.ts`/`client.ts`) to address the 80% quota-warning
-e-mail to the workspace's current admin.
+e-mail and the E-Mail-Eingang rejection notice to every current admin, one message each
+(decisions/0082-several-admins-per-workspace.md).
 
 ## Tests
 
@@ -272,12 +296,19 @@ database-level half (the composite unique, the dropped one, the oldest-first ord
 onboarding and invitation flows are `tests/e2e/onboarding.spec.ts` and
 `tests/e2e/invitation.spec.ts`. F5 (decisions/0027-hardening-and-deletion.md):
 `deleteWorkspace`/`leaveWorkspace` unit tests are in
-`src/persistence/tests/workspaces-use-cases.test.ts` (confirmation mismatch, admin-cannot-leave,
+`src/persistence/tests/workspaces-use-cases.test.ts` (confirmation mismatch, last-admin-cannot-leave,
 membership cleanup, the enqueued workspace-less
 `cleanup-workspace-storage` job); `deleteWorkspaceAction`/`leaveWorkspaceAction`'s own
 `tests/actions.test.ts` cases mock `getObjectStorage`/`redirect`; the actual cross-table
 cascade is proved against real Postgres in
-`src/persistence/tests/workspaces-repository.db.test.ts`.
+`src/persistence/tests/workspaces-repository.db.test.ts`. decisions/0082 (several admins):
+`setMemberRole`/`removeMember`/`leaveWorkspace`'s last-admin rule and
+`getWorkspaceWithAdminContacts` are unit-tested in
+`src/persistence/tests/workspaces-use-cases.test.ts`, `setMemberRoleAction` in
+`tests/actions.test.ts`; `src/persistence/tests/workspaces-several-admins.db.test.ts` proves
+against real Postgres that two admins demoting, removing or leaving at the same moment leave
+exactly one admin; `tests/e2e/team-admins.spec.ts` drives promote, the co-admin's finance
+navigation, demote with its confirmation, and self-demotion.
 
 ## How the `projects` example module was removed
 

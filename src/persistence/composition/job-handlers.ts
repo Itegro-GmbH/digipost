@@ -35,7 +35,7 @@ import type { MatchPaymentsInput, MatchSettlementReportInput, PaymentsUseCases }
 import type { WorkspaceUseCases } from "@/persistence/use-cases/workspaces-use-cases";
 import { JOB_KINDS, TransientJobError } from "@/platform/jobs";
 import { serverEnv } from "@/platform/env/server";
-import type { Mailer } from "@/platform/mailer/server";
+import type { MailMessage, Mailer } from "@/platform/mailer/server";
 import type { ObjectStorage } from "@/platform/object-storage";
 
 // `kindOverride` (decisions/0072-correcting-a-document-s-kind.md): only `reclassifyDocument`
@@ -68,6 +68,23 @@ async function scheduleLedgerSync(ledger: LedgerUseCases, workspaceId: string): 
   } catch (err) {
     console.error("[ledger] failed to schedule the proposal sync", { workspaceId, err: err instanceof Error ? err.name : "unknown" });
   }
+}
+
+/** decisions/0082-several-admins-per-workspace.md: an admin notice goes to every admin, one
+ * message each (never one message with every admin in `to`, so no admin's address is shown to
+ * another and one bounced address does not hold back the rest). A failure throws after the
+ * remaining recipients were tried, so the job queue retries; a retry may send the notice again
+ * to an admin who already got it, which is harmless for these informational mails. */
+async function sendToEach(mailer: Mailer, recipients: readonly string[], message: Omit<MailMessage, "to">): Promise<void> {
+  let firstError: unknown;
+  for (const to of recipients) {
+    try {
+      await mailer.send({ ...message, to });
+    } catch (err) {
+      firstError ??= err;
+    }
+  }
+  if (firstError !== undefined) throw firstError;
 }
 
 export function createJobHandlers(deps: {
@@ -167,11 +184,12 @@ export function createJobHandlers(deps: {
     // workspace's tier, stored count, and usage may all have moved on between enqueueing
     // (inside `billing-use-cases.ts`'s `recordDocumentsCreated`) and this job actually
     // running (another document created or deleted, a package bought, a tier change) -
-    // the mail reports whatever is true right now, addressed to whoever is admin right now.
+    // the mail reports whatever is true right now, addressed to whoever is admin right now:
+    // every admin, one message each (decisions/0082-several-admins-per-workspace.md).
     [JOB_KINDS.sendQuotaWarning]: async (payload) => {
       const input: SendQuotaWarningInput = sendQuotaWarningPayloadSchema.parse(payload);
-      const contact = await deps.workspaces.getWorkspaceWithAdminContact(input.workspaceId);
-      if (!contact || !contact.adminEmail) return;
+      const contact = await deps.workspaces.getWorkspaceWithAdminContacts(input.workspaceId);
+      if (!contact || contact.adminEmails.length === 0) return;
 
       const tier = contact.workspace.tier as Tier;
       const limits = TIER_LIMITS[tier];
@@ -190,8 +208,7 @@ export function createJobHandlers(deps: {
 
       const url = `${serverEnv().APP_URL}/dashboard/billing`;
       const email = await renderQuotaWarningEmail({ workspaceName: contact.workspace.name, limit: input.limit, current, max, url });
-      await deps.mailer.send({
-        to: contact.adminEmail,
+      await sendToEach(deps.mailer, contact.adminEmails, {
         subject: quotaWarningEmailSubject(input.limit),
         html: email.html,
         text: email.text,
@@ -224,14 +241,15 @@ export function createJobHandlers(deps: {
     },
 
     // decisions/0075-email-intake.md: the admin's rejection notice. The throttle was decided
-    // when this job was enqueued; this handler only renders and sends, to whoever is admin now.
+    // when this job was enqueued; this handler only renders and sends, to whoever is admin now
+    // (every admin, one message each, decisions/0082-several-admins-per-workspace.md).
     [JOB_KINDS.sendMailIntakeNotification]: async (payload) => {
       const input: SendMailIntakeNotificationInput = sendMailIntakeNotificationPayloadSchema.parse(payload);
       const [contact, details] = await Promise.all([
-        deps.workspaces.getWorkspaceWithAdminContact(input.workspaceId),
+        deps.workspaces.getWorkspaceWithAdminContacts(input.workspaceId),
         deps.mailIntake.getNotificationDetails(input),
       ]);
-      if (!contact || !contact.adminEmail || !details) return;
+      if (!contact || contact.adminEmails.length === 0 || !details) return;
 
       const email = await renderMailIntakeNotificationEmail({
         workspaceName: contact.workspace.name,
@@ -240,8 +258,7 @@ export function createJobHandlers(deps: {
         subject: details.subject,
         url: `${serverEnv().APP_URL}/dashboard/email-intake`,
       });
-      await deps.mailer.send({
-        to: contact.adminEmail,
+      await sendToEach(deps.mailer, contact.adminEmails, {
         subject: mailIntakeNotificationSubject(input.reason),
         html: email.html,
         text: email.text,

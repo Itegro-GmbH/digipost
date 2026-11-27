@@ -45,7 +45,12 @@ vi.mock("@/platform/env/server", () => ({
 
 const revalidatePathMock = vi.fn();
 vi.mock("next/cache", () => ({
-  revalidatePath: (path: string) => revalidatePathMock(path),
+  revalidatePath: (...args: unknown[]) => revalidatePathMock(...args),
+}));
+
+const logAuditEvent = vi.fn();
+vi.mock("@/platform/observability/server", () => ({
+  logAuditEvent: (...args: unknown[]) => logAuditEvent(...args),
 }));
 
 const workspacesUseCases = {
@@ -53,6 +58,7 @@ const workspacesUseCases = {
   invite: vi.fn(),
   revokeInvitation: vi.fn(),
   removeMember: vi.fn(),
+  setMemberRole: vi.fn(),
   acceptInvitation: vi.fn(),
   updateCompanyProfile: vi.fn(),
   leaveWorkspace: vi.fn(),
@@ -77,6 +83,7 @@ import {
   leaveWorkspaceAction,
   removeMemberAction,
   revokeInvitationAction,
+  setMemberRoleAction,
   switchWorkspaceAction,
   updateCompanyProfileAction,
 } from "../actions";
@@ -350,6 +357,89 @@ describe("removeMemberAction", () => {
 
     expect(result).toEqual({ status: "error", errorCode: "cannot_remove_self" });
   });
+
+  // decisions/0082-several-admins-per-workspace.md
+  it("maps last_admin", async () => {
+    vi.mocked(requirePermission).mockResolvedValue(ACCESS);
+    workspacesUseCases.removeMember.mockRejectedValue(new UseCaseError(WORKSPACE_ERROR.lastAdmin));
+
+    const result = await removeMemberAction({ memberId: crypto.randomUUID() });
+
+    expect(result).toEqual({ status: "error", errorCode: "last_admin" });
+  });
+});
+
+describe("setMemberRoleAction (decisions/0082-several-admins-per-workspace.md)", () => {
+  it("requires members.manage, scopes by the session's workspace, and writes one audit line", async () => {
+    vi.mocked(requirePermission).mockResolvedValue(ACCESS);
+    workspacesUseCases.setMemberRole.mockResolvedValue({ role: "admin", changed: true });
+    const memberId = crypto.randomUUID();
+
+    const result = await setMemberRoleAction({ memberId, role: "admin" });
+
+    expect(requirePermission).toHaveBeenCalledWith("members.manage");
+    expect(workspacesUseCases.setMemberRole).toHaveBeenCalledWith({ workspaceId: "w1", memberId, role: "admin" });
+    expect(result).toEqual({ status: "success", data: { role: "admin", selfChanged: false } });
+    expect(logAuditEvent).toHaveBeenCalledWith("workspace.member_role_changed", {
+      workspaceId: "w1",
+      actorMembershipId: "m1",
+      memberId,
+      role: "admin",
+    });
+    expect(revalidatePathMock).toHaveBeenCalledWith("/dashboard", "layout");
+  });
+
+  it("reports selfChanged when the caller demoted themself", async () => {
+    vi.mocked(requirePermission).mockResolvedValue({ ...ACCESS, access: { ...ACCESS.access, membershipId: "11111111-1111-4111-8111-111111111111" } });
+    workspacesUseCases.setMemberRole.mockResolvedValue({ role: "member", changed: true });
+
+    const result = await setMemberRoleAction({ memberId: "11111111-1111-4111-8111-111111111111", role: "member" });
+
+    expect(result).toEqual({ status: "success", data: { role: "member", selfChanged: true } });
+  });
+
+  it("writes no audit line for a no-op", async () => {
+    vi.mocked(requirePermission).mockResolvedValue(ACCESS);
+    workspacesUseCases.setMemberRole.mockResolvedValue({ role: "member", changed: false });
+
+    const result = await setMemberRoleAction({ memberId: crypto.randomUUID(), role: "member" });
+
+    expect(result).toEqual({ status: "success", data: { role: "member", selfChanged: false } });
+    expect(logAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("forwards forbidden for a non-admin without calling the use case", async () => {
+    vi.mocked(requirePermission).mockResolvedValue({ status: "error", errorCode: "forbidden" });
+
+    const result = await setMemberRoleAction({ memberId: crypto.randomUUID(), role: "admin" });
+
+    expect(result).toEqual({ status: "error", errorCode: "forbidden" });
+    expect(workspacesUseCases.setMemberRole).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unknown role or a malformed id without calling the use case", async () => {
+    vi.mocked(requirePermission).mockResolvedValue(ACCESS);
+
+    await expect(setMemberRoleAction({ memberId: crypto.randomUUID(), role: "owner" })).resolves.toEqual({
+      status: "error",
+      errorCode: "invalid_input",
+    });
+    await expect(setMemberRoleAction({ memberId: "not-a-uuid", role: "admin" })).resolves.toEqual({
+      status: "error",
+      errorCode: "invalid_input",
+    });
+    expect(workspacesUseCases.setMemberRole).not.toHaveBeenCalled();
+  });
+
+  it("maps last_admin", async () => {
+    vi.mocked(requirePermission).mockResolvedValue(ACCESS);
+    workspacesUseCases.setMemberRole.mockRejectedValue(new UseCaseError(WORKSPACE_ERROR.lastAdmin));
+
+    const result = await setMemberRoleAction({ memberId: crypto.randomUUID(), role: "member" });
+
+    expect(result).toEqual({ status: "error", errorCode: "last_admin" });
+    expect(logAuditEvent).not.toHaveBeenCalled();
+  });
 });
 
 describe("acceptInvitationAction", () => {
@@ -411,13 +501,13 @@ describe("leaveWorkspaceAction (F5, decisions/0027-hardening-and-deletion.md)", 
     expect(clearActiveWorkspaceCookie).not.toHaveBeenCalled();
   });
 
-  it("maps cannot_leave_as_admin from a thrown UseCaseError, never redirecting", async () => {
+  it("maps last_admin from a thrown UseCaseError, never redirecting", async () => {
     vi.mocked(getWorkspaceAccess).mockResolvedValue(ACCESS);
-    workspacesUseCases.leaveWorkspace.mockRejectedValue(new UseCaseError(WORKSPACE_ERROR.cannotLeaveAsAdmin));
+    workspacesUseCases.leaveWorkspace.mockRejectedValue(new UseCaseError(WORKSPACE_ERROR.lastAdmin));
 
     const result = await leaveWorkspaceAction();
 
-    expect(result).toEqual({ status: "error", errorCode: "cannot_leave_as_admin" });
+    expect(result).toEqual({ status: "error", errorCode: "last_admin" });
     expect(redirectMock).not.toHaveBeenCalled();
   });
 });

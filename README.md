@@ -13,7 +13,7 @@ Maintenance triggers:
 - A new top-level owner root (`src/modules/`, `src/persistence/`, ...) is populated for the first
   time
 - `.github/workflows/ci.yml` changes what runs or when
-Last verified: 2026-11-13, decisions/0081-ledger-via-api.md: the three `LEDGER_API_*` variables in
+Last verified: 2026-11-27, decisions/0082-several-admins-per-workspace.md: a workspace may have several admins (the finance step). Previously 2026-11-13, decisions/0081-ledger-via-api.md: the three `LEDGER_API_*` variables in
 the env table. Previously 2026-11-05, decisions/0079-outgoing-invoices.md: added the "Rechnungen schreiben"
 feature bullet and item 12a of "Before going to production" (no new environment variable).
 2026-11-03, decisions/0078-mcp-server.md: added the "MCP server for AI clients"
@@ -384,7 +384,8 @@ for why there are three DB roles.
    decisions/0017-billing-tiers-and-packages.md.
 6. **Try finance (admin-only).** Upload a CAMT.053 or MT940 bank-statement export, or a
    bank/payout CSV export (step 3 above) to see `/dashboard/finance` ("Finanzen") populate an account and
-   its transactions - visible and manageable only for the workspace's admin
+   its transactions - visible and manageable only for the workspace's admins (a workspace may
+   have several, decisions/0082-several-admins-per-workspace.md)
    (`finance.read`/`finance.manage`, decisions/0024-accounts-and-transactions.md); a plain
    member never even sees the nav entry. The 4 MB upload cap applies to a structured file
    too, so export a large statement monthly rather than for a whole year

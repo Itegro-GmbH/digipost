@@ -395,7 +395,7 @@ describe("createWorkspaceUseCases", () => {
   describe("removeMember", () => {
     it("removes a member", async () => {
       const member = memberRow({ workspaceId: "w1", userId: "u2", role: "member" });
-      const { useCases, memberState } = setup({ members: [member] });
+      const { useCases, memberState } = setup({ workspaces: [workspaceRow({ id: "w1", name: "Muster GmbH" })], members: [member] });
 
       await useCases.removeMember({ workspaceId: "w1", actorMembershipId: "admin-membership", memberId: member.id });
 
@@ -410,10 +410,139 @@ describe("createWorkspaceUseCases", () => {
     });
 
     it("rejects removing a member that does not exist", async () => {
-      const { useCases } = setup();
+      const { useCases } = setup({ workspaces: [workspaceRow({ id: "w1", name: "Muster GmbH" })] });
       await expect(
         useCases.removeMember({ workspaceId: "w1", actorMembershipId: "admin-membership", memberId: crypto.randomUUID() }),
       ).rejects.toMatchObject({ code: WORKSPACE_ERROR.notFound });
+    });
+
+    // decisions/0082-several-admins-per-workspace.md
+    it("removes another admin while one admin remains", async () => {
+      const actor = memberRow({ workspaceId: "w1", userId: "u1", role: "admin" });
+      const other = memberRow({ workspaceId: "w1", userId: "u2", role: "admin" });
+      const { useCases, memberState } = setup({ workspaces: [workspaceRow({ id: "w1", name: "Muster GmbH" })], members: [actor, other] });
+
+      await useCases.removeMember({ workspaceId: "w1", actorMembershipId: actor.id, memberId: other.id });
+
+      expect(memberState.map((m) => m.id)).toEqual([actor.id]);
+    });
+
+    it("refuses to remove the last admin with last_admin, touching nothing", async () => {
+      // Only reachable through a race (the actor is an admin too), which is why the check runs
+      // under the workspace lock rather than trusting the actor's own role.
+      const actor = memberRow({ workspaceId: "w1", userId: "u1", role: "member" });
+      const admin = memberRow({ workspaceId: "w1", userId: "u2", role: "admin" });
+      const { useCases, memberState } = setup({ workspaces: [workspaceRow({ id: "w1", name: "Muster GmbH" })], members: [actor, admin] });
+
+      await expect(
+        useCases.removeMember({ workspaceId: "w1", actorMembershipId: actor.id, memberId: admin.id }),
+      ).rejects.toMatchObject({ code: WORKSPACE_ERROR.lastAdmin });
+      expect(memberState).toHaveLength(2);
+    });
+  });
+
+  describe("setMemberRole (decisions/0082-several-admins-per-workspace.md)", () => {
+    function twoPeople(otherRole: "admin" | "member") {
+      const admin = memberRow({ workspaceId: "w1", userId: "u1", role: "admin" });
+      const other = memberRow({ workspaceId: "w1", userId: "u2", role: otherRole });
+      return { admin, other, ...setup({ workspaces: [workspaceRow({ id: "w1", name: "Muster GmbH" })], members: [admin, other] }) };
+    }
+
+    it("promotes a member to admin", async () => {
+      const { useCases, memberState, other } = twoPeople("member");
+
+      const result = await useCases.setMemberRole({ workspaceId: "w1", memberId: other.id, role: "admin" });
+
+      expect(result).toEqual({ role: "admin", changed: true });
+      expect(memberState.filter((m) => m.role === "admin")).toHaveLength(2);
+    });
+
+    it("demotes another admin while one admin remains", async () => {
+      const { useCases, memberState, other } = twoPeople("admin");
+
+      const result = await useCases.setMemberRole({ workspaceId: "w1", memberId: other.id, role: "member" });
+
+      expect(result).toEqual({ role: "member", changed: true });
+      expect(memberState.find((m) => m.id === other.id)?.role).toBe("member");
+    });
+
+    it("lets an admin demote themself while another admin remains", async () => {
+      const { useCases, memberState, admin } = twoPeople("admin");
+
+      await useCases.setMemberRole({ workspaceId: "w1", memberId: admin.id, role: "member" });
+
+      expect(memberState.find((m) => m.id === admin.id)?.role).toBe("member");
+    });
+
+    it("refuses to demote the last admin with last_admin, touching nothing", async () => {
+      const { useCases, memberState, admin } = twoPeople("member");
+
+      await expect(useCases.setMemberRole({ workspaceId: "w1", memberId: admin.id, role: "member" })).rejects.toMatchObject({
+        code: WORKSPACE_ERROR.lastAdmin,
+      });
+      expect(memberState.find((m) => m.id === admin.id)?.role).toBe("admin");
+    });
+
+    it("treats setting the role a member already has as a no-op success", async () => {
+      const { useCases, admin } = twoPeople("member");
+
+      await expect(useCases.setMemberRole({ workspaceId: "w1", memberId: admin.id, role: "admin" })).resolves.toEqual({
+        role: "admin",
+        changed: false,
+      });
+    });
+
+    it("rejects a member of another workspace with not_found", async () => {
+      const foreign = memberRow({ workspaceId: "w2", userId: "u3", role: "member" });
+      const { useCases, memberState } = setup({
+        workspaces: [workspaceRow({ id: "w1", name: "Muster GmbH" }), workspaceRow({ id: "w2", name: "Muster GmbH" })],
+        members: [foreign],
+      });
+
+      await expect(useCases.setMemberRole({ workspaceId: "w1", memberId: foreign.id, role: "admin" })).rejects.toMatchObject({
+        code: WORKSPACE_ERROR.notFound,
+      });
+      expect(memberState[0]?.role).toBe("member");
+    });
+
+    it("rejects a workspace that does not exist with not_found", async () => {
+      const { useCases } = setup();
+      await expect(useCases.setMemberRole({ workspaceId: "w1", memberId: "m1", role: "admin" })).rejects.toMatchObject({
+        code: WORKSPACE_ERROR.notFound,
+      });
+    });
+
+    it("rejects an unknown role with invalid_input", async () => {
+      const { useCases, other } = twoPeople("member");
+      await expect(
+        useCases.setMemberRole({ workspaceId: "w1", memberId: other.id, role: "owner" as unknown as "admin" }),
+      ).rejects.toMatchObject({ code: WORKSPACE_ERROR.invalidInput });
+    });
+  });
+
+  describe("getWorkspaceWithAdminContacts (decisions/0082-several-admins-per-workspace.md)", () => {
+    it("lists every admin's e-mail address, oldest membership first, and no member's", async () => {
+      const first = memberRow({ workspaceId: "w1", userId: "u1", role: "admin", joinedAt: new Date("2026-01-01T00:00:00Z") });
+      const member = memberRow({ workspaceId: "w1", userId: "u2", role: "member", joinedAt: new Date("2026-01-02T00:00:00Z") });
+      const second = memberRow({ workspaceId: "w1", userId: "u3", role: "admin", joinedAt: new Date("2026-01-03T00:00:00Z") });
+      const { useCases } = setup({
+        workspaces: [workspaceRow({ id: "w1", name: "Muster GmbH" })],
+        members: [second, member, first],
+        users: {
+          u1: { email: "first@example.test", name: "First" },
+          u2: { email: "member@example.test", name: "Member" },
+          u3: { email: "second@example.test", name: "Second" },
+        },
+      });
+
+      const contact = await useCases.getWorkspaceWithAdminContacts("w1");
+
+      expect(contact?.adminEmails).toEqual(["first@example.test", "second@example.test"]);
+    });
+
+    it("returns null for a workspace that does not exist", async () => {
+      const { useCases } = setup();
+      await expect(useCases.getWorkspaceWithAdminContacts("w1")).resolves.toBeNull();
     });
   });
 
@@ -838,26 +967,38 @@ describe("createWorkspaceUseCases", () => {
   describe("leaveWorkspace (F5, decisions/0027-hardening-and-deletion.md)", () => {
     it("lets a non-admin member leave", async () => {
       const member = memberRow({ workspaceId: "w1", userId: "u2", role: "member" });
-      const { useCases, memberState } = setup({ members: [member] });
+      const { useCases, memberState } = setup({ workspaces: [workspaceRow({ id: "w1", name: "Muster GmbH" })], members: [member] });
 
       await useCases.leaveWorkspace({ workspaceId: "w1", membershipId: member.id });
 
       expect(memberState).toHaveLength(0);
     });
 
-    it("rejects the workspace's own admin with cannot_leave_as_admin, touching nothing", async () => {
+    // decisions/0082-several-admins-per-workspace.md
+    it("lets an admin leave while another admin remains", async () => {
       const admin = memberRow({ workspaceId: "w1", userId: "u1", role: "admin" });
-      const { useCases, memberState } = setup({ members: [admin] });
+      const other = memberRow({ workspaceId: "w1", userId: "u2", role: "admin" });
+      const { useCases, memberState } = setup({ workspaces: [workspaceRow({ id: "w1", name: "Muster GmbH" })], members: [admin, other] });
+
+      await useCases.leaveWorkspace({ workspaceId: "w1", membershipId: admin.id });
+
+      expect(memberState.map((m) => m.id)).toEqual([other.id]);
+    });
+
+    it("rejects the workspace's last admin with last_admin, touching nothing", async () => {
+      const admin = memberRow({ workspaceId: "w1", userId: "u1", role: "admin" });
+      const member = memberRow({ workspaceId: "w1", userId: "u2", role: "member" });
+      const { useCases, memberState } = setup({ workspaces: [workspaceRow({ id: "w1", name: "Muster GmbH" })], members: [admin, member] });
 
       await expect(useCases.leaveWorkspace({ workspaceId: "w1", membershipId: admin.id })).rejects.toMatchObject({
-        code: WORKSPACE_ERROR.cannotLeaveAsAdmin,
+        code: WORKSPACE_ERROR.lastAdmin,
       });
-      expect(memberState).toHaveLength(1);
+      expect(memberState).toHaveLength(2);
     });
 
     it("rejects a membership that does not exist (or belongs to another workspace) with not_found", async () => {
       const member = memberRow({ workspaceId: "w2", userId: "u2", role: "member" });
-      const { useCases } = setup({ members: [member] });
+      const { useCases } = setup({ workspaces: [workspaceRow({ id: "w1", name: "Muster GmbH" }), workspaceRow({ id: "w2", name: "Muster GmbH" })], members: [member] });
 
       await expect(useCases.leaveWorkspace({ workspaceId: "w1", membershipId: member.id })).rejects.toMatchObject({
         code: WORKSPACE_ERROR.notFound,
